@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <link rel="stylesheet" href="style.css">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <link rel="icon" type="image/svg" href="images/uno.svg">
+        <title>Quno</title>
+    </head>
+
+    <body>
+        <header>
+            <h1>Quno</h1>
+        </header>
+        <main>
+            <div class="game-options">
+                <input type="button" id="btnStart" class="game-btn" value="Start New Match" onclick="resetGame()">
+                <input type="button" id="btnJoin" class="game-btn" value="Join" onclick="joinGame()">
+                <input type="button" id="btnDraw" class="game-btn" value="Draw" onclick="drawCard()">
+            </div>
+
+            <div class="status" id="status"></div>
+
+            <div id="deck" class="deck">
+                <div id="discard" class="discard">
+                    <div id="discard-top" class="card"></div>
+                </div>
+            </div>
+
+            <div id="players" class="players">
+            </div>
+
+            <div id="color-buttons" class="color-buttons">
+                <input type="button" id="btnYellow" class="btn" value="Yellow" onclick="setColor('yellow')">
+                <input type="button" id="btnRed" class="btn" value="Red" onclick="setColor('red')">
+                <input type="button" id="btnBlue" class="btn" value="Blue" onclick="setColor('blue')">
+                <input type="button" id="btnGreen" class="btn" value="Green" onclick="setColor('green')">
+            </div>
+        </main>
+
+        <script type="text/javascript" src="/socket.io/socket.io.js"></script>
+        <script type="text/javascript" src="/main.js"></script>
+    </body>
+</html>

@@ -1,0 +1,196 @@
+:root{
+    --card-width: 60px;
+    --card-height: 100px;
+}
+
+body {
+    font-family: Arial, sans-serif;
+    margin: 0;
+    padding: 0;
+    background-color: #00897B;
+}
+
+main {
+    width: 90%;
+    border: solid 1px #ddd;
+    margin: 0 auto;
+    background: #3ac7fe;
+    border: solid 10px;
+    min-height: 350px;
+    font-family: sans-serif;
+    padding: 20px;
+}
+
+.btn, .game-btn {
+    border: none;
+    padding: 10px 30px;
+    border-radius: 10px;
+    cursor: pointer;
+    font-size: 15pt;
+    font-weight: bold;
+    background: #222;
+    color: white !important;
+    border-radius: 0px;
+}
+
+.btn:hover {
+    background: dodgerblue;
+}
+
+header h1 {
+    padding: 10px;
+    background: black;
+    color: white;
+    font-family: sans-serif;
+}
+
+main .game-options {
+    text-align: center;
+}
+
+main .card {
+    width: var(--card-width);
+    height: var(--card-height);
+    padding: 5px;
+    border: solid 1px #808080;
+    background-color: white;
+    display: inline-block;
+    border-radius: 10px;
+    font-size: 10pt;
+    text-align: left;
+    margin: 3px;
+    border: solid 3px;
+
+    vertical-align: top;
+    white-space: nowrap;
+    margin-left: -20px;
+    position: relative;
+    z-index: 1;
+    flex: 0 0 var(--card-width); /* Set a fixed width for each card */
+}
+
+main .card:first-child {
+    margin-left: 0; /* Remove the overlap for the first card */
+}
+
+main .status {
+    display: inline-block;
+    background: gold;
+    border: solid 5px white;
+    border-radius: 10px;
+    padding: 5px 20px;
+    margin: 0 auto;
+    margin-top: 10px;
+    display: none;
+}
+
+.players {
+    width: 80%;
+    margin: 0 auto;
+    margin-top: 20px;
+    font-size: 15pt;
+    font-weight: bold;
+    text-align: center;
+}
+
+.player {
+    width: 400px;
+    border-radius: 10px;
+    padding: 10px;
+    display: inline-block;
+    margin: 1%;
+    vertical-align: top;
+    background: #d1d1d1;
+}
+
+.player.active {
+    border: solid 5px #222;
+    background: #f5f5f5;
+}
+
+.points {
+    text-align: center;
+    font-size: 12pt;
+    font-weight: bold;
+    margin: 10px;
+}
+
+.draw {
+    float: left;
+    background: white;
+    color: #222;
+    padding: 10px;
+    border-radius: 10px;
+    border: double 5px;
+    width: 60px;
+    height: 100px;
+    font-size: 12pt;
+}
+
+.discard {
+    float: right;
+    background: white;
+    color: #222;
+    padding: 10px;
+    border-radius: 10px;
+    border: double 5px;
+    width: 60px;
+    height: 100px;
+    font-size: 12pt;
+}
+
+main .player .hand {
+    /* ... */
+    display: flex; /* Use flexbox for horizontal alignment */
+    justify-content: flex-start; /* Align cards to the left */
+    align-items: flex-start; /* Align cards to the top */
+    position: relative;
+    padding-left: 20px; /* Add left padding to offset the overlap */
+}
+
+main .card .value {
+    font-size: 15pt;
+    font-family: sans-serif;
+    font-weight: bold;
+    color: white;
+    /*transform: translateY(50%);*/
+}
+
+main .card .color {
+    height: 100%;
+    width: 100%;
+    border-radius: 10px;
+}
+
+main .card .Blue {
+    background-color: blue;
+}
+
+main .card .Green {
+    background-color: green;
+}
+
+main .card .Red {
+    background-color: red;
+}
+
+main .card .Yellow {
+    background-color: goldenrod;
+}
+
+main .card .Black {
+    background-color: black;
+}
+
+main .card .weight {
+    font-size: 15pt;
+    font-family: sans-serif;
+}
+
+#color-buttons {
+    display: none;
+}
+
+.game-btn {
+    display: none;
+}
