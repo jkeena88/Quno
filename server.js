@@ -75,6 +75,8 @@ function onConnection(socket) {
                 discardCard(card, socket.id);
 
                 checkForWin(socket.id);
+
+                io.emit('hideColor');
                 
                 if(playType == 'wild') {
                     io.to(socket.id).emit('chooseColor');
@@ -103,6 +105,7 @@ function onConnection(socket) {
     });
 
     socket.on('colorChosen', function(color) {
+        io.emit('colorChosen', color);
         currentColor = color;
         nextTurn();
         
