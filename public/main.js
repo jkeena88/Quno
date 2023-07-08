@@ -29,6 +29,14 @@ socket.on('chooseColor', function() {
     document.getElementById('color-buttons').style.display="inline-block";
 });
 
+socket.on('colorChosen', function(color) {
+    document.getElementById('discard').style.background=color;
+});
+
+socket.on('hideColor', function() {
+    document.getElementById('discard').style.background="white";
+});
+
 socket.on('notYourTurn', function(PlayerID) {
     document.getElementById('player_' + PlayerID).classList.remove('active');
     document.getElementById('btnDraw').style.display="none";
