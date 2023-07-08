@@ -4,6 +4,7 @@ const cdWidth = 120;
 const cdHeight = 180;
 const cards = new Image();
 const back = new Image();
+var socketId = -1;
 
 let isPlayerA = false;
 
@@ -62,20 +63,28 @@ function getCardUI(card, player) {
     cardObj.className = 'card';
     cardObj.id = 'card_' + card;
     
-    const offsetX = 1680 - cdWidth * (card % 14); // X-coordinate of the top-left corner of the portion
-    const offsetY = 1440 - cdHeight * Math.floor(card / 14); // Y-coordinate of the top-left corner of the portion
-    cardObj.style.backgroundImage = 'url(' + cards.src + ')';
-    //cardObj.style.backgroundSize = '300%';
-    cardObj.style.backgroundPosition = `${offsetX}px ${offsetY}px`;
-    cardObj.addEventListener('click', () => playCard(card, player));
+    if(player == null || player.SocketID == socketId) {
+        const offsetX = 1680 - cdWidth * (card % 14); // X-coordinate of the top-left corner of the portion
+        const offsetY = 1440 - cdHeight * Math.floor(card / 14); // Y-coordinate of the top-left corner of the portion
+        cardObj.style.backgroundImage = 'url(' + cards.src + ')';
+        //cardObj.style.backgroundSize = '300%';
+        cardObj.style.backgroundPosition = `${offsetX}px ${offsetY}px`;
 
-    cardObj.addEventListener('mouseenter', function () {
-      cardObj.style.transform = 'translateY(-50px)';
-    });
+        if(player != null) {
+            cardObj.addEventListener('click', () => playCard(card, player));
 
-    cardObj.addEventListener('mouseleave', function () {
-      cardObj.style.transform = 'translateY(0)';
-    });
+            cardObj.addEventListener('mouseenter', function () {
+            cardObj.style.transform = 'translateY(-50px)';
+            });
+
+            cardObj.addEventListener('mouseleave', function () {
+            cardObj.style.transform = 'translateY(0)';
+            });
+        }
+    } else {
+        cardObj.style.backgroundImage = 'url(' + back.src + ')';
+        cardObj.style.backgroundSize = '100%';
+    }
 
     return cardObj;
 }
@@ -152,6 +161,7 @@ function getCookie(name) {
 }
 
 function requestJoin() {
+    socketId = socket.id;
     socket.emit('requestJoin', playerName);
 }
 
