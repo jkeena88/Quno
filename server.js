@@ -4,7 +4,7 @@ const server = require('http').Server(app);
 const io = require('socket.io')(server);
 const port = process.env.PORT || 3000;
 
-app.use(express.static(__dirname + '/public'));
+app.use(express.static(__dirname + '/public', { 'Content-Type': 'application/javascript' }));
 io.on('connection', onConnection);
 server.listen(port, () => console.log('listening on port ' + port));
 
