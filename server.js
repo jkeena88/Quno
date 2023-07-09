@@ -252,8 +252,10 @@ function dealHands() {
         });
     }
 
-    card = deck.pop();
-    discardCard(card, -1);
+    do {
+        card = deck.pop();
+        discardCard(card, -1);
+    } while(currentColor == 'black')
 }
 
 function drawCard(SocketID, num) {
