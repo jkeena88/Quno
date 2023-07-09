@@ -138,7 +138,7 @@ socket.on('discardCard', function(card, player) {
 
 function init() {
     cards.src = 'images/deck_full.png';
-    back.src = 'images/uno.svg';
+    back.src = 'images/quno.png';
   
     playerName = getCookie('playerName');
     if(playerName == null) {
