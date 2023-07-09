@@ -17,6 +17,7 @@ var cardsToDraw;
 var discardPile = new Array();
 let players = new Map();
 let deck = new Array();
+let playerA = null;
 
 
 /**
@@ -26,9 +27,16 @@ let deck = new Array();
  */
 function onConnection(socket) {
 
-    if(io.engine.clientsCount == 1) {
-        io.emit('isPlayerA');
+    if(playerA == null) {
+        playerA = socket.id;
+        io.to(socket.id).emit('isPlayerA');
     }
+
+    socket.on('disconnect', () => {
+        if(socket.id == playerA) {
+            playerA = null;
+        }
+    });
 
     /**
      * Whenever a room is requested, looks for a slot for the player,
