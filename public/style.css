@@ -1,6 +1,6 @@
 :root{
-    --card-width: 60px;
-    --card-height: 100px;
+    --card-width: 107px;
+    --card-height: 165px;
 }
 
 body {
@@ -53,24 +53,25 @@ main .card {
     height: var(--card-height);
     padding: 5px;
     border: solid 1px #808080;
-    background-color: white;
+    background-color: none;
     display: inline-block;
-    border-radius: 10px;
+    border-radius: 15px;
     font-size: 10pt;
     text-align: left;
     margin: 3px;
-    border: solid 3px;
 
     vertical-align: top;
     white-space: nowrap;
     margin-left: -20px;
     position: relative;
     z-index: 1;
-    flex: 0 0 var(--card-width); /* Set a fixed width for each card */
+    flex: 0 0 var(--card-width);
+    zoom: 0.6;
+    -moz-transform: scale(0.6);
 }
 
 main .card:first-child {
-    margin-left: 0; /* Remove the overlap for the first card */
+    margin-left: 0;
 }
 
 main .status {
@@ -140,12 +141,11 @@ main .status {
 }
 
 main .player .hand {
-    /* ... */
-    display: flex; /* Use flexbox for horizontal alignment */
-    justify-content: flex-start; /* Align cards to the left */
-    align-items: flex-start; /* Align cards to the top */
+    display: flex;
+    justify-content: flex-start;
+    align-items: flex-start;
     position: relative;
-    padding-left: 20px; /* Add left padding to offset the overlap */
+    padding-left: 20px;
 }
 
 main .card .value {
@@ -153,7 +153,6 @@ main .card .value {
     font-family: sans-serif;
     font-weight: bold;
     color: white;
-    /*transform: translateY(50%);*/
 }
 
 main .card .color {
@@ -193,4 +192,8 @@ main .card .weight {
 
 .game-btn {
     display: none;
+}
+
+#btnUnoMe {
+    background: gray;
 }
