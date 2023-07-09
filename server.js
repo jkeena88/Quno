@@ -117,9 +117,6 @@ function onConnection(socket) {
     });
 
     socket.on('drawCard', function() {
-        let player = players.get(socket.id);
-        player.HasCalledUno = false;
-        io.to(socket.id).emit('notCalledUnoMe');
         drawCard(socket.id, 1);
     });
 
@@ -260,6 +257,10 @@ function dealHands() {
 }
 
 function drawCard(SocketID, num) {
+    let player = players.get(SocketID);
+    player.HasCalledUno = false;
+    io.to(SocketID).emit('calledUnoMe');
+
     var numRemaining = num;
 
     while(numRemaining > 0) {
@@ -326,7 +327,8 @@ function discardCard(card, SocketID) {
 }
 
 function nextTurn() {
-    var currentPlayerID = players.get(currentPlayer).PlayerID;
+    let player = players.get(currentPlayer);
+    var currentPlayerID = player.PlayerID;
 
     io.to(currentPlayer).emit('notYourTurn', currentPlayerID);
     currentPlayerID += playDirection;
@@ -337,13 +339,20 @@ function nextTurn() {
         currentPlayerID -= players.size;
     }
 
-    players.forEach((player) => {
-        if(player.PlayerID == currentPlayerID) {
-            currentPlayer = player.SocketID;
+    players.forEach((nextPlayer) => {
+        if(nextPlayer.PlayerID == currentPlayerID) {
+            currentPlayer = nextPlayer.SocketID;
         }
     });
 
     canPlay(currentPlayer);
+
+    player = players.get(currentPlayer);
+
+    if(player.Hand.length <= 2) {
+        io.to(currentPlayer).emit('notCalledUnoMe');
+    }
+
     io.to(currentPlayer).emit('yourTurn', currentPlayerID);
 }
 
