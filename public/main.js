@@ -46,6 +46,14 @@ socket.on('canDrawCard', function() {
     document.getElementById('btnDraw').style.display="inline-block";
 });
 
+socket.on('calledUnoMe', function() {
+    document.getElementById('btnUnoMe').style.background="gray";
+});
+
+socket.on('notCalledUnoMe', function() {
+    document.getElementById('btnUnoMe').style.background="#222";
+});
+
 socket.on('updateScore', function(player, points) {
     document.getElementById('points_' + player).innerHTML = points;
 });
@@ -72,11 +80,11 @@ function getCardUI(card, player) {
     cardObj.id = 'card_' + card;
     
     if(player == null || player.SocketID == socketId) {
-        const offsetX = 1680 - cdWidth * (card % 14); // X-coordinate of the top-left corner of the portion
+        const offsetX = 2 + 1680 - cdWidth * (card % 14); // X-coordinate of the top-left corner of the portion
         const offsetY = 1440 - cdHeight * Math.floor(card / 14); // Y-coordinate of the top-left corner of the portion
         cardObj.style.backgroundImage = 'url(' + cards.src + ')';
-        //cardObj.style.backgroundSize = '300%';
         cardObj.style.backgroundPosition = `${offsetX}px ${offsetY}px`;
+        //cardObj.style.backgroundSize = '1200%';
 
         if(player != null) {
             cardObj.addEventListener('click', () => playCard(card, player));
@@ -209,6 +217,14 @@ function createPlayersUI(players) {
         div_player.appendChild(div_points);
         document.getElementById('players').appendChild(div_player);
     }
+}
+
+function unoMe() {
+    socket.emit('unoMe');
+}
+
+function unoYou() {
+    socket.emit('unoYou');
 }
 
 
