@@ -72,10 +72,18 @@ function onConnection(socket) {
 
         if(socket.id == currentPlayer) {
             if(playColor == currentColor || playColor == 'black' || playType == currentType) {
+                let player = players.get(socket.id);
                 discardCard(card, socket.id);
 
                 checkForWin(socket.id);
 
+                /*
+                if(player.Hand.length == 1) {
+                    player.NeedsCallUno = true;
+                } else {
+                    player.NeedsCallUno = false;
+                }
+                */
                 io.emit('hideColor');
                 
                 if(playType == 'wild') {
@@ -101,6 +109,9 @@ function onConnection(socket) {
     });
 
     socket.on('drawCard', function() {
+        let player = players.get(socket.id);
+        player.HasCalledUno = false;
+        io.to(socket.id).emit('notCalledUnoMe');
         drawCard(socket.id, 1);
     });
 
@@ -114,6 +125,23 @@ function onConnection(socket) {
             nextTurn();
         }
         cardsToDraw = 0;
+    });
+
+    socket.on('unoMe', function() {
+        let player = players.get(socket.id);
+
+        if((player.Hand.length <= 2 && socket.id == currentPlayer) || player.Hand.length == 1) {
+            player.HasCalledUno = true;
+            io.to(socket.id).emit('calledUnoMe');
+        }
+    });
+
+    socket.on('unoYou', function() {
+        players.forEach((player) => {
+            if(player.Hand.length == 1 && player.HasCalledUno == false) {
+                drawCard(player.SocketID, 4);
+            };
+        });
     });
 }
 
@@ -189,7 +217,7 @@ function createPlayers(num) {
 
     io.sockets.sockets.forEach((socket) => {
         var hand = new Array();
-        var player = {Name: socket.playerName, PlayerID: i, Points: 0, Hand: hand, SocketID: socket.id};
+        var player = {Name: socket.playerName, PlayerID: i, Points: 0, Hand: hand, SocketID: socket.id, NeedsCallUno: false, HasCalledUno: false};
         players.set(socket.id, player);
         i++;
     });
