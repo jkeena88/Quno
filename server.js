@@ -13,7 +13,7 @@ var playDirection = 1;
 var currentPlayer;
 var currentColor;
 var currentType;
-var cardsToDraw;
+var cardsToDraw = 0;
 var discardPile = new Array();
 let players = new Map();
 let deck = new Array();
@@ -21,6 +21,7 @@ let playerA = null;
 let playWildDraw4 = false;
 let stackDraw2 = false;
 let skipDraw2 = false;
+let requiredPlay = '';
 
 
 /**
@@ -92,7 +93,8 @@ function onConnection(socket) {
                 var draw4wild = (playType == 'draw4' && !canPlay(currentPlayer, ['draw4']));
             }
 
-            if(colorMatch || typeMatch || wild || draw4wild) {
+            if((colorMatch || typeMatch || wild || draw4wild) && (requiredPlay == '' || requiredPlay == playType)) {
+                requiredPlay = '';
                 discardCard(card, socket.id);
 
                 checkForWin(socket.id);
@@ -111,9 +113,15 @@ function onConnection(socket) {
                     playDirection = -playDirection;
                     nextTurn();
                 } else if(playType == 'draw2') {
+                    cardsToDraw += 2;
                     nextTurn();
-                    drawCard(currentPlayer, 2);
-                    nextTurn();
+
+                    if(stackDraw2 && canPlay(currentPlayer, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 'skip', 'reverse', 'wild', 'draw4'])) {
+                        requiredPlay = 'draw2';
+                    } else {
+                        drawCard(currentPlayer, cardsToDraw);
+                        nextTurn();
+                    }
                 } else {
                     nextTurn();
                 }
@@ -157,19 +165,23 @@ function onConnection(socket) {
     socket.on('saveOptions', (data) => {
         let selectedOptions = data.options;
 
-        selectedOptions.forEach(option => {
-            switch(option) {
-                case 'playWildDraw4':
-                    playWildDraw4 = true;
-                    break;
-                case 'stackDraw2':
-                    stackDraw2 = true;
-                    break;
-                case 'skipDraw2':
-                    stackDraw2 = true;
-                    break;
-            }
-        });
+        if(selectedOptions.includes('playWildDraw4')) {
+            playWildDraw4 = true;
+        } else {
+            playWildDraw4 = false;
+        }
+
+        if(selectedOptions.includes('stackDraw2')) {
+            stackDraw2 = true;
+        } else {
+            stackDraw2 = false;
+        }
+
+        if(selectedOptions.includes('skipDraw2')) {
+            skipDraw2 = true;
+        } else {
+            skipDraw2 = false;
+        }
     });
 }
 
@@ -313,6 +325,8 @@ function drawCard(SocketID, num) {
             io.to(currentPlayer).emit('canDrawCard');
         }
     }
+
+    cardsToDraw = 0;
 }
 
 function checkForWin(SocketID) {
