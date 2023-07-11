@@ -18,6 +18,9 @@ var discardPile = new Array();
 let players = new Map();
 let deck = new Array();
 let playerA = null;
+let playWildDraw4 = false;
+let stackDraw2 = false;
+let skipDraw2 = false;
 
 
 /**
@@ -64,7 +67,6 @@ function onConnection(socket) {
         }
     });
 
-    
     socket.on('resetGame', function() {
         var playerCount = io.engine.clientsCount;
 
@@ -79,19 +81,22 @@ function onConnection(socket) {
         let playType = cardType(card);
 
         if(socket.id == currentPlayer) {
-            if(playColor == currentColor || playColor == 'black' || playType == currentType) {
-                let player = players.get(socket.id);
+
+            let colorMatch = (playColor == currentColor && playColor != 'black');
+            let typeMatch = (playType == currentType && playColor != 'black');
+            let wild = (playType == 'wild');
+
+            if(playWildDraw4) {
+                var draw4wild = (playType == 'draw4');
+            } else {
+                var draw4wild = (playType == 'draw4' && !canPlay(currentPlayer, ['draw4']));
+            }
+
+            if(colorMatch || typeMatch || wild || draw4wild) {
                 discardCard(card, socket.id);
 
                 checkForWin(socket.id);
 
-                /*
-                if(player.Hand.length == 1) {
-                    player.NeedsCallUno = true;
-                } else {
-                    player.NeedsCallUno = false;
-                }
-                */
                 io.emit('hideColor');
                 
                 if(playType == 'wild') {
@@ -146,6 +151,24 @@ function onConnection(socket) {
             if(player.Hand.length == 1 && player.HasCalledUno == false) {
                 drawCard(player.SocketID, 4);
             };
+        });
+    });
+
+    socket.on('saveOptions', (data) => {
+        let selectedOptions = data.options;
+
+        selectedOptions.forEach(option => {
+            switch(option) {
+                case 'playWildDraw4':
+                    playWildDraw4 = true;
+                    break;
+                case 'stackDraw2':
+                    stackDraw2 = true;
+                    break;
+                case 'skipDraw2':
+                    stackDraw2 = true;
+                    break;
+            }
         });
     });
 }
@@ -222,7 +245,7 @@ function createPlayers(num) {
 
     io.sockets.sockets.forEach((socket) => {
         var hand = new Array();
-        var player = {Name: socket.playerName, PlayerID: i, Points: 0, Hand: hand, SocketID: socket.id, NeedsCallUno: false, HasCalledUno: false};
+        var player = {Name: socket.playerName, PlayerID: i, Points: 0, Hand: hand, SocketID: socket.id, HasCalledUno: false};
         players.set(socket.id, player);
         i++;
     });
@@ -285,7 +308,10 @@ function drawCard(SocketID, num) {
     }
 
     if(num == 1) {
-        canPlay(currentPlayer);
+        let hasCard = canPlay(currentPlayer, ['none']);
+        if(!hasCard) {
+            io.to(currentPlayer).emit('canDrawCard');
+        }
     }
 }
 
@@ -347,7 +373,10 @@ function nextTurn() {
         }
     });
 
-    canPlay(currentPlayer);
+    let hasCard = canPlay(currentPlayer, ['none']);
+    if(!hasCard) {
+        io.to(currentPlayer).emit('canDrawCard');
+    }
 
     player = players.get(currentPlayer);
 
@@ -358,7 +387,7 @@ function nextTurn() {
     io.to(currentPlayer).emit('yourTurn', currentPlayerID);
 }
 
-function canPlay(currentPlayer) {
+function canPlay(currentPlayer, invalidCards) {
     let player = players.get(currentPlayer);
     let hasCard = false;
     
@@ -366,15 +395,15 @@ function canPlay(currentPlayer) {
         let playColor = cardColor(card);
         let playType = cardType(card);
 
-        if(playColor == currentColor || playColor == 'black' || playType == currentType) {
-            hasCard = true;
-            return;
+        if(!invalidCards.includes(playType)) {
+            if(playColor == currentColor || playColor == 'black' || playType == currentType) {
+                hasCard = true;
+                return hasCard;
+            }
         }
     })
 
-    if(!hasCard) {
-        io.to(player.SocketID).emit('canDrawCard');
-    }
+    return hasCard;
 }
 
 function startGame() {
@@ -391,6 +420,11 @@ function startGame() {
     io.emit('gameStarted', Array.from(players.values()));
     createDeck();
     dealHands();
-    canPlay(currentPlayer);
+
+    let hasCard = canPlay(currentPlayer, ['none']);
+    if(!hasCard) {
+        io.to(currentPlayer).emit('canDrawCard');
+    }
+    
     io.to(currentPlayer).emit('yourTurn', currentPlayerID);
 }

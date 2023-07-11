@@ -13,6 +13,7 @@ socket.on('connect', requestJoin);
 socket.on('isPlayerA', function() {
     isPlayerA = true;
     document.getElementById('btnStart').style.display="inline-block";
+    document.getElementById('btnOptions').style.display="inline-block";
 });
 
 socket.on('gameStarted', function(players) {
@@ -80,11 +81,10 @@ function getCardUI(card, player) {
     cardObj.id = 'card_' + card;
     
     if(player == null || player.SocketID == socketId) {
-        const offsetX = 2 + 1680 - cdWidth * (card % 14); // X-coordinate of the top-left corner of the portion
-        const offsetY = 1440 - cdHeight * Math.floor(card / 14); // Y-coordinate of the top-left corner of the portion
+        const offsetX = 2 + 1680 - cdWidth * (card % 14);
+        const offsetY = 1440 - cdHeight * Math.floor(card / 14);
         cardObj.style.backgroundImage = 'url(' + cards.src + ')';
         cardObj.style.backgroundPosition = `${offsetX}px ${offsetY}px`;
-        //cardObj.style.backgroundSize = '1200%';
 
         if(player != null) {
             cardObj.addEventListener('click', () => playCard(card, player));
@@ -225,6 +225,18 @@ function unoMe() {
 
 function unoYou() {
     socket.emit('unoYou');
+}
+
+function showOptions() {
+    document.getElementById('options').style.display = 'flex';
+}
+
+function saveOptions() {
+    document.getElementById('options').style.display = 'none';
+    let checkboxes = document.querySelectorAll('#options input[type="checkbox"]:checked');
+    let selectedValues = Array.from(checkboxes).map(checkbox => checkbox.value);
+
+    socket.emit('saveOptions', {options: selectedValues});
 }
 
 

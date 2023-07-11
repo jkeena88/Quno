@@ -14,9 +14,17 @@
         </header>
         <main>
             <div class="game-options">
+                <input type="button" id="btnOptions" class="game-btn" value="Options" onclick="showOptions()">
                 <input type="button" id="btnStart" class="game-btn" value="Start New Match" onclick="resetGame()">
                 <input type="button" id="btnJoin" class="game-btn" value="Join" onclick="joinGame()">
                 <input type="button" id="btnDraw" class="game-btn" value="Draw" onclick="drawCard()">
+            </div>
+
+            <div id="options">
+                <label><input type="checkbox" name="playWildDraw4" value="playWildDraw4">Play Wild Draw 4 any time</label>
+                <label><input type="checkbox" name="stackDraw2" value="stackDraw2">Stack Draw 2s</label>
+                <label><input type="checkbox" name="skipDraw2" value="skipDraw2">Skip Draw 2s</label>
+                <input type="button" id="btnSaveOptions" class="btn" value="Save" onclick="saveOptions()">
             </div>
 
             <div class="status" id="status"></div>
