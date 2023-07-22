@@ -138,6 +138,7 @@ main .status {
     width: 60px;
     height: 100px;
     font-size: 12pt;
+    display: none;
 }
 
 main .player .hand {
@@ -187,6 +188,10 @@ main .card .weight {
 }
 
 #color-buttons {
+    display: none;
+}
+
+#uno-buttons {
     display: none;
 }
 

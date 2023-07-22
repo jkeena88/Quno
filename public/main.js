@@ -19,6 +19,8 @@ socket.on('isPlayerA', function() {
 socket.on('gameStarted', function(players) {
     document.getElementById("status").style.display="none";
     document.getElementById('btnStart').style.display="none";
+    document.getElementById('uno-buttons').style.display="inline-block";
+    document.getElementById('discard').style.display="inline-block";
     createPlayersUI(players);
 });
 
