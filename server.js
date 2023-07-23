@@ -296,7 +296,7 @@ function dealHands() {
 function drawCard(SocketID, num) {
     let player = players.get(SocketID);
     player.HasCalledUno = false;
-    io.to(SocketID).emit('calledUnoMe');
+    io.to(SocketID).emit('notCalledUnoMe');
 
     var numRemaining = num;
 
@@ -333,8 +333,11 @@ function checkForWin(SocketID) {
     let player = players.get(SocketID);
 
     if(player.Hand.length == 0) {
+        let player = players.get(currentPlayer);
+        var currentPlayerID = player.PlayerID;
         getPoints(players);
         io.emit('gameOver', player.Name);
+        io.emit('notYourTurn', currentPlayerID);
     }
 }
 
