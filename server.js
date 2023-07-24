@@ -16,6 +16,7 @@ var currentType;
 var cardsToDraw = 0;
 var discardPile = new Array();
 let players = new Map();
+let playersInLobby = new Array();
 let deck = new Array();
 let playerA = null;
 let playWildDraw4 = false;
@@ -41,6 +42,8 @@ function onConnection(socket) {
         if(socket.id == playerA) {
             playerA = null;
         }
+        playersInLobby = playersInLobby.filter(player => player !== socket.playerName);
+        io.emit('newPlayer', playersInLobby);
     });
 
     /**
@@ -61,7 +64,9 @@ function onConnection(socket) {
 
         if(people < maxPlayers) {
             socket.join();
+            playersInLobby.push(playerName);
             io.to(socket.id).emit('responseRoom', [people + 1, maxPlayers]);
+            io.emit('newPlayer', playersInLobby);
 
             return;
         } else {

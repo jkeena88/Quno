@@ -82,6 +82,9 @@ main .status {
     padding: 5px 20px;
     margin: 0 auto;
     margin-top: 10px;
+}
+
+main #status {
     display: none;
 }
 

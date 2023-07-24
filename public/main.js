@@ -24,6 +24,10 @@ socket.on('gameStarted', function(players) {
     createPlayersUI(players);
 });
 
+socket.on('newPlayer', function(playersInLobby) {
+    document.getElementById('playerList').innerHTML = "Players: " + playersInLobby.join(', ');
+});
+
 socket.on('yourTurn', function(PlayerID) {
     document.getElementById('player_' + PlayerID).classList.add('active');
 });
