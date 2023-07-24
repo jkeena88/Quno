@@ -215,3 +215,9 @@ main .card .weight {
     align-items: flex-start;
     padding: 10px;
 }
+
+hr {
+    border: 1px solid gray;
+    margin: 10px 0;
+    width: 100%;
+}

@@ -22,9 +22,11 @@
             </div>
 
             <div id="options">
-                <label><input type="checkbox" name="playWildDraw4" value="playWildDraw4">Play Wild Draw 4 any time</label>
-                <label><input type="checkbox" name="stackDraw2" value="stackDraw2">Stack Draw 2s</label>
-                <label><input type="checkbox" name="skipDraw2" value="skipDraw2">Skip Draw 2s</label>
+                <label><input type="checkbox" id="masterCheckbox" name="mattMode" value="mattMode">Matt Mode (maximum chaos)</label>
+                <hr>
+                <label><input type="checkbox" class="controlledCheckbox" name="playWildDraw4" value="playWildDraw4">Play Wild Draw 4 any time</label>
+                <label><input type="checkbox" class="controlledCheckbox" name="stackDraw2" value="stackDraw2">Stack Draw 2s</label>
+                <label><input type="checkbox" class="controlledCheckbox" name="skipDraw2" value="skipDraw2">Skip Draw 2s</label>
                 <input type="button" id="btnSaveOptions" class="btn" value="Save" onclick="saveOptions()">
             </div>
 
@@ -54,5 +56,17 @@
 
         <script type="text/javascript" src="/socket.io/socket.io.js"></script>
         <script type="text/javascript" src="/main.js"></script>
+
+        <script>
+            const masterCheckbox = document.getElementById('masterCheckbox');
+            const controlledCheckboxes = document.querySelectorAll('.controlledCheckbox');
+            
+            masterCheckbox.addEventListener('click', () => {
+                const isChecked = masterCheckbox.checked;
+                controlledCheckboxes.forEach(checkbox => {
+                    checkbox.checked = isChecked;
+                });
+            });
+        </script>
     </body>
 </html>
