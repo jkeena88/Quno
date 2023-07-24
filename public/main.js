@@ -18,7 +18,7 @@ socket.on('isPlayerA', function() {
 
 socket.on('gameStarted', function(players) {
     document.getElementById("status").style.display="none";
-    document.getElementById('btnStart').style.display="none";
+    document.getElementById('btnDeal').style.display="none";
     document.getElementById('uno-buttons').style.display="inline-block";
     document.getElementById('discard').style.display="inline-block";
     createPlayersUI(players);
@@ -64,7 +64,11 @@ socket.on('updateScore', function(player, points) {
 socket.on('gameOver', function(playerName) {
     document.getElementById('status').innerHTML = playerName + ' WON';
     document.getElementById("status").style.display="inline-block";
-    document.getElementById("btnDeal").style.display="inline-block";
+
+    if(isPlayerA) {
+        console.log(isPlayerA);
+        document.getElementById("btnDeal").style.display="inline-block";
+    }
 });
 
 socket.on('renderCard', function(card, player) {
@@ -185,6 +189,10 @@ function requestJoin() {
 
 function resetGame() {
     socket.emit('resetGame');
+}
+
+function newHand() {
+    socket.emit('newHand');
 }
 
 function drawCard() {

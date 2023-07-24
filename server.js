@@ -77,6 +77,10 @@ function onConnection(socket) {
         }
     });
 
+    socket.on('newHand', function() {
+        startGame();
+    });
+
     socket.on('playCard', function(card) {
         let playColor = cardColor(card);
         let playType = cardType(card);
@@ -251,7 +255,7 @@ function cardValue(card) {
     return points;
 }
 
-function createPlayers(num) {
+function createPlayers() {
     players.clear();
     var i = 0;
 
