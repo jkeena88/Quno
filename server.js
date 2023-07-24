@@ -21,6 +21,7 @@ let playerA = null;
 let playWildDraw4 = false;
 let stackDraw2 = false;
 let skipDraw2 = false;
+let reverseDraw2 = false;
 let requiredPlay = '';
 
 
@@ -185,6 +186,12 @@ function onConnection(socket) {
             skipDraw2 = true;
         } else {
             skipDraw2 = false;
+        }
+
+        if(selectedOptions.includes('reverseDraw2')) {
+            reverseDraw2 = true;
+        } else {
+            reverseDraw2 = false;
         }
     });
 }
