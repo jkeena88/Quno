@@ -8,7 +8,7 @@ app.use(express.static(__dirname + '/public', { 'Content-Type': 'application/jav
 io.on('connection', onConnection);
 server.listen(port, () => console.log('listening on port ' + port));
 
-const maxPlayers = 7;
+const maxPlayers = 8;
 var playDirection = 1;
 var currentPlayer;
 var currentColor;

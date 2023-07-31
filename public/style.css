@@ -52,7 +52,6 @@ main .card {
     width: var(--card-width);
     height: var(--card-height);
     padding: 5px;
-    border: solid 1px #808080;
     background-color: none;
     display: inline-block;
     border-radius: 15px;
@@ -90,7 +89,7 @@ main #status {
 
 .players {
     width: 80%;
-    margin: 0 auto;
+    margin: 0;
     margin-top: 20px;
     font-size: 15pt;
     font-weight: bold;
@@ -109,22 +108,27 @@ main #status {
 }
 
 .player0 {
-    grid-column: 2;
+    grid-column: 2 / span 2;
     grid-row: 1;
 }
 
 .player1 {
-    grid-column: 3;
+    grid-column: 4 / span 2;
     grid-row: 1;
 }
 
 .player2 {
-    grid-column: 1;
+    grid-column: 6 / span 2;
+    grid-row: 1;
+}
+
+.player3 {
+    grid-column: 1 / span 2;
     grid-row: 2;
 }
 
 .playArea1 {
-    grid-column: 2;
+    grid-column: 3 / span 2;
     grid-row: 2 / span 2;
     background-image: url(images/quno.png);
     background-size: contain;
@@ -133,27 +137,27 @@ main #status {
 }
 
 .playArea2 {
-    grid-column: 3;
+    grid-column: 5 / span 2;
     grid-row: 2 / span 2;
 }
 
-.player3 {
-    grid-column: 4;
+.player4 {
+    grid-column: 7 / span 2;
     grid-row: 2;
 }
 
-.player4 {
-    grid-column: 1;
+.player5 {
+    grid-column: 1 / span 2;
     grid-row: 3;
 }
 
-.player5 {
-    grid-column: 4;
+.player6 {
+    grid-column: 7 / span 2;
     grid-row: 3;
 }
 
 .playerSelf {
-    grid-column: 1 / span 4;
+    grid-column: 2 / span 6;
     grid-row: 4;
 }
 

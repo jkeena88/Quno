@@ -5,6 +5,7 @@ const cdHeight = 180;
 const cards = new Image();
 const back = new Image();
 var socketId = -1;
+var playerId = -1;
 var players = 0;
 
 let isPlayerA = false;
@@ -22,6 +23,14 @@ socket.on('gameStarted', function(players) {
     document.getElementById('btnDeal').style.display="none";
     document.getElementById('uno-buttons').style.display="inline-block";
     document.getElementById('discard').style.display="inline-block";
+
+    for(var i = 0; i < players.length; i++) {
+        if(players[i].SocketID == socketId) {
+            playerId = players[i].PlayerID;
+        }
+    }
+
+    console.log(players);
     createPlayersUI(players);
 });
 
@@ -219,7 +228,6 @@ function createPlayersUI(players) {
     document.getElementById('player4').innerHTML = '';
     document.getElementById('player5').innerHTML = '';
     document.getElementById('playerSelf').innerHTML = '';
-    let player_iterator = 0;
 
     for(var i = 0; i < players.length; i++) {
         var div_player = document.createElement('div');
@@ -243,8 +251,37 @@ function createPlayersUI(players) {
         if(players[i].SocketID == socketId) {
             document.getElementById('playerSelf').appendChild(div_player);
         } else {
-            document.getElementById('player' + player_iterator).appendChild(div_player);
-            player_iterator += 1;
+            let player_location = playerId - players[i].PlayerID;
+            
+            if(player_location < 0) {
+                player_location += 8;
+            }
+
+            switch(player_location) {
+                case 1:
+                    player_location = 5;
+                    break;
+                case 2:
+                    player_location = 3;
+                    break;
+                case 3:
+                    player_location = 0;
+                    break;
+                case 4:
+                    player_location = 1;
+                    break;
+                case 5:
+                    player_location = 2;
+                    break;
+                case 6:
+                    player_location = 4;
+                    break;
+                case 7:
+                    player_location = 6;
+                    break;
+            }
+
+            document.getElementById('player' + player_location).appendChild(div_player);
         }
     }
 }
