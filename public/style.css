@@ -95,6 +95,66 @@ main #status {
     font-size: 15pt;
     font-weight: bold;
     text-align: center;
+    display: grid;
+    gap: 10px;
+    background-color: #2196F3;
+    padding: 10px;
+}
+
+.grid-item {
+    background-color: rgba(255, 255, 255, 0.8);
+    text-align: center;
+    padding: 20px;
+    font-size: 30px;
+}
+
+.player0 {
+    grid-column: 2;
+    grid-row: 1;
+}
+
+.player1 {
+    grid-column: 3;
+    grid-row: 1;
+}
+
+.player2 {
+    grid-column: 1;
+    grid-row: 2;
+}
+
+.playArea1 {
+    grid-column: 2;
+    grid-row: 2 / span 2;
+    background-image: url(images/quno.png);
+    background-size: contain;
+    background-repeat: no-repeat;
+    background-position: center;
+}
+
+.playArea2 {
+    grid-column: 3;
+    grid-row: 2 / span 2;
+}
+
+.player3 {
+    grid-column: 4;
+    grid-row: 2;
+}
+
+.player4 {
+    grid-column: 1;
+    grid-row: 3;
+}
+
+.player5 {
+    grid-column: 4;
+    grid-row: 3;
+}
+
+.playerSelf {
+    grid-column: 1 / span 4;
+    grid-row: 4;
 }
 
 .player {

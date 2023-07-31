@@ -5,6 +5,7 @@ const cdHeight = 180;
 const cards = new Image();
 const back = new Image();
 var socketId = -1;
+var players = 0;
 
 let isPlayerA = false;
 
@@ -26,6 +27,7 @@ socket.on('gameStarted', function(players) {
 
 socket.on('newPlayer', function(playersInLobby) {
     document.getElementById('playerList').innerHTML = "Players: " + playersInLobby.join(', ');
+    players = playersInLobby.length;
 });
 
 socket.on('yourTurn', function(PlayerID) {
@@ -210,7 +212,15 @@ function setColor(color) {
 }
 
 function createPlayersUI(players) {
-    document.getElementById('players').innerHTML = '';
+    document.getElementById('player0').innerHTML = '';
+    document.getElementById('player1').innerHTML = '';
+    document.getElementById('player2').innerHTML = '';
+    document.getElementById('player3').innerHTML = '';
+    document.getElementById('player4').innerHTML = '';
+    document.getElementById('player5').innerHTML = '';
+    document.getElementById('playerSelf').innerHTML = '';
+    let player_iterator = 0;
+
     for(var i = 0; i < players.length; i++) {
         var div_player = document.createElement('div');
         var div_player_name = document.createElement('div');
@@ -229,7 +239,13 @@ function createPlayersUI(players) {
         div_player.appendChild(div_player_name);
         div_player.appendChild(div_hand);
         div_player.appendChild(div_points);
-        document.getElementById('players').appendChild(div_player);
+
+        if(players[i].SocketID == socketId) {
+            document.getElementById('playerSelf').appendChild(div_player);
+        } else {
+            document.getElementById('player' + player_iterator).appendChild(div_player);
+            player_iterator += 1;
+        }
     }
 }
 

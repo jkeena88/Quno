@@ -8,7 +8,7 @@ app.use(express.static(__dirname + '/public', { 'Content-Type': 'application/jav
 io.on('connection', onConnection);
 server.listen(port, () => console.log('listening on port ' + port));
 
-const maxPlayers = 8;
+const maxPlayers = 7;
 var playDirection = 1;
 var currentPlayer;
 var currentColor;
@@ -23,7 +23,9 @@ let playWildDraw4 = false;
 let stackDraw2 = false;
 let skipDraw2 = false;
 let reverseDraw2 = false;
-let requiredPlay = '';
+let stackDraw4 = false;
+let cardList = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 'skip', 'reverse', 'draw2', 'wild', 'draw4']
+let requiredPlay = new Array();
 
 
 /**
@@ -103,8 +105,8 @@ function onConnection(socket) {
                 var draw4wild = (playType == 'draw4' && !canPlay(currentPlayer, ['draw4']));
             }
 
-            if((colorMatch || typeMatch || wild || draw4wild) && (requiredPlay == '' || requiredPlay == playType)) {
-                requiredPlay = '';
+            if((colorMatch || typeMatch || wild || draw4wild) && (requiredPlay.length == 0 || requiredPlay.includes(playType))) {
+                requiredPlay = new Array();
                 discardCard(card, socket.id);
 
                 checkForWin(socket.id);
@@ -114,21 +116,39 @@ function onConnection(socket) {
                 if(playType == 'wild') {
                     io.to(socket.id).emit('chooseColor');
                 } else if(playType == 'draw4') {
-                    cardsToDraw = 4;
+                    cardsToDraw += 4;
                     io.to(socket.id).emit('chooseColor');
                 } else if(playType == 'skip') {
                     nextTurn();
+                    drawCard(currentPlayer, cardsToDraw);
                     nextTurn();
                 } else if(playType == 'reverse') {
                     playDirection = -playDirection;
                     nextTurn();
+
+                    if(cardsToDraw > 0) {
+                        drawCard(currentPlayer, cardsToDraw);
+                        nextTurn();
+                    }
                 } else if(playType == 'draw2') {
                     cardsToDraw += 2;
                     nextTurn();
 
-                    if(stackDraw2 && canPlay(currentPlayer, [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 'skip', 'reverse', 'wild', 'draw4'])) {
-                        requiredPlay = 'draw2';
-                    } else {
+                    if(stackDraw2) {
+                        requiredPlay.push('draw2');
+                    }
+
+                    if(skipDraw2) {
+                        requiredPlay.push('skip');
+                    }
+
+                    if(reverseDraw2) {
+                        requiredPlay.push('reverse');
+                    }
+
+                    let tempArray = cardList.filter(item => !requiredPlay.includes(item));
+
+                    if(!canPlay(currentPlayer, tempArray)) {
                         drawCard(currentPlayer, cardsToDraw);
                         nextTurn();
                     }
@@ -149,10 +169,18 @@ function onConnection(socket) {
         nextTurn();
         
         if(cardsToDraw > 0) {
-            drawCard(currentPlayer, cardsToDraw);
-            nextTurn();
+
+            if(stackDraw4) {
+                requiredPlay.push('draw4');
+            }
+
+            let tempArray = cardList.filter(item => !requiredPlay.includes(item));
+
+            if(!canPlay(currentPlayer, tempArray)) {
+                drawCard(currentPlayer, cardsToDraw);
+                nextTurn();
+            }
         }
-        cardsToDraw = 0;
     });
 
     socket.on('unoMe', function() {
@@ -197,6 +225,12 @@ function onConnection(socket) {
             reverseDraw2 = true;
         } else {
             reverseDraw2 = false;
+        }
+
+        if(selectedOptions.includes('stackDraw4')) {
+            stackDraw4 = true;
+        } else {
+            stackDraw4 = false;
         }
     });
 }

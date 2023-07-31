@@ -28,6 +28,7 @@
                 <label><input type="checkbox" class="controlledCheckbox" name="stackDraw2" value="stackDraw2">Stack Draw 2s</label>
                 <label><input type="checkbox" class="controlledCheckbox" name="skipDraw2" value="skipDraw2">Skip Draw 2s</label>
                 <label><input type="checkbox" class="controlledCheckbox" name="reverseDraw2" value="reverseDraw2">Reverse Draw 2s</label>
+                <label><input type="checkbox" class="controlledCheckbox" name="stackDraw4" value="stackDraw4">Stack Draw 4s</label>
                 <input type="button" id="btnSaveOptions" class="btn" value="Save" onclick="saveOptions()">
             </div>
 
@@ -35,13 +36,22 @@
 
             <div class="status" id="status"></div>
 
-            <div id="deck" class="deck">
-                <div id="discard" class="discard">
-                    <div id="discard-top" class="card"></div>
-                </div>
-            </div>
-
             <div id="players" class="players">
+                <div id="player0" class="grid-item player0">0</div>
+                <div id="player1" class="grid-item player1">1</div>
+                <div id="player2" class="grid-item player2">2</div>
+                <div class="grid-item playArea1"></div>
+                <div class="grid-item playArea2">
+                    <div id="deck" class="deck">
+                        <div id="discard" class="discard">
+                            <div id="discard-top" class="card"></div>
+                        </div>
+                    </div>
+                </div>
+                <div id="player3" class="grid-item player3">3</div>
+                <div id="player4" class="grid-item player4">4</div>
+                <div id="player5" class="grid-item player5">5</div>
+                <div id="playerSelf" class="grid-item playerSelf">Self</div>
             </div>
 
             <div id="color-buttons" class="color-buttons">
