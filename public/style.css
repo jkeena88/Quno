@@ -28,6 +28,7 @@ main {
     background: #222;
     color: white !important;
     border-radius: 0px;
+    margin: 5px;
 }
 
 .btn:hover, .game-btn:hover {
@@ -199,7 +200,7 @@ main #status {
     color: #222;
     padding: 10px;
     border-radius: 10px;
-    border: double 5px;
+    border: 2px;
     width: 60px;
     height: 100px;
     font-size: 12pt;
