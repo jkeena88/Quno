@@ -18,7 +18,6 @@
                 <input type="button" id="btnStart" class="game-btn" value="Start New Match" onclick="resetGame()">
                 <input type="button" id="btnDeal" class="game-btn" value="Deal New Hand" onclick="newHand()">
                 <input type="button" id="btnJoin" class="game-btn" value="Join" onclick="joinGame()">
-                <input type="button" id="btnDraw" class="game-btn" value="Draw" onclick="drawCard()">
             </div>
 
             <div id="options">
@@ -32,15 +31,15 @@
                 <input type="button" id="btnSaveOptions" class="btn" value="Save" onclick="saveOptions()">
             </div>
 
-            <div class="status" id="playerList">Players: </div>
+            <div class="status" id="playerList"><strong>Players: </strong></div>
 
             <div class="status" id="status"></div>
 
             <div id="players" class="players">
-                <div id="player0" class="grid-item player0">0</div>
-                <div id="player1" class="grid-item player1">1</div>
-                <div id="player2" class="grid-item player2">2</div>
-                <div id="player3" class="grid-item player3">3</div>
+                <div id="player0" class="grid-item player0"></div>
+                <div id="player1" class="grid-item player1"></div>
+                <div id="player2" class="grid-item player2"></div>
+                <div id="player3" class="grid-item player3"></div>
                 <div class="grid-item playArea1"></div>
                 <div class="grid-item playArea2">
                     <div id="deck" class="deck">
@@ -49,10 +48,10 @@
                         </div>
                     </div>
                 </div>
-                <div id="player4" class="grid-item player4">4</div>
-                <div id="player5" class="grid-item player5">5</div>
-                <div id="player6" class="grid-item player6">6</div>
-                <div id="playerSelf" class="grid-item playerSelf">Self</div>
+                <div id="player4" class="grid-item player4"></div>
+                <div id="player5" class="grid-item player5"></div>
+                <div id="player6" class="grid-item player6"></div>
+                <div id="playerSelf" class="grid-item playerSelf"></div>
             </div>
 
             <div id="color-buttons" class="color-buttons">
@@ -65,6 +64,7 @@
             <div id="uno-buttons" class="uno-buttons">
                 <input type="button" id="btnUnoMe" class="btn" value="Call Uno For Me" onclick="unoMe()">
                 <input type="button" id="btnUnoYou" class="btn" value="Call Uno On Another" onclick="unoYou()">
+                <input type="button" id="btnDraw" class="game-btn" value="Draw" onclick="drawCard()">
             </div>
         </main>
 

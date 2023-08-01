@@ -21,7 +21,7 @@ socket.on('isPlayerA', function() {
 socket.on('gameStarted', function(players) {
     document.getElementById("status").style.display="none";
     document.getElementById('btnDeal').style.display="none";
-    document.getElementById('uno-buttons').style.display="inline-block";
+    document.getElementById('uno-buttons').style.display="flex";
     document.getElementById('discard').style.display="inline-block";
 
     for(var i = 0; i < players.length; i++) {
@@ -35,7 +35,7 @@ socket.on('gameStarted', function(players) {
 });
 
 socket.on('newPlayer', function(playersInLobby) {
-    document.getElementById('playerList').innerHTML = "Players: " + playersInLobby.join(', ');
+    document.getElementById('playerList').innerHTML = "<strong>Players: </strong>" + playersInLobby.join(', ');
     players = playersInLobby.length;
 });
 
@@ -44,7 +44,7 @@ socket.on('yourTurn', function(PlayerID) {
 });
 
 socket.on('chooseColor', function() {
-    document.getElementById('color-buttons').style.display="inline-block";
+    document.getElementById('color-buttons').style.display="flex";
 });
 
 socket.on('colorChosen', function(color) {
@@ -227,6 +227,7 @@ function createPlayersUI(players) {
     document.getElementById('player3').innerHTML = '';
     document.getElementById('player4').innerHTML = '';
     document.getElementById('player5').innerHTML = '';
+    document.getElementById('player6').innerHTML = '';
     document.getElementById('playerSelf').innerHTML = '';
 
     for(var i = 0; i < players.length; i++) {
@@ -235,6 +236,7 @@ function createPlayersUI(players) {
         var div_hand = document.createElement('div');
         var div_points = document.createElement('div');
 
+        div_player_name.className = 'name';
         div_points.className = 'points';
         div_points.id = 'points_' + players[i].PlayerID;
         div_player.className = 'player';
@@ -244,15 +246,15 @@ function createPlayersUI(players) {
 
         div_player_name.innerHTML = players[i].Name;
         div_points.innerHTML = 'Points: ' + players[i].Points;
-        div_player.appendChild(div_player_name);
         div_player.appendChild(div_hand);
+        div_player.appendChild(div_player_name);
         div_player.appendChild(div_points);
 
         if(players[i].SocketID == socketId) {
             document.getElementById('playerSelf').appendChild(div_player);
         } else {
             let player_location = playerId - players[i].PlayerID;
-            
+
             if(player_location < 0) {
                 player_location += 8;
             }

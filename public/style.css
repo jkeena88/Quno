@@ -12,10 +12,7 @@ body {
 
 main {
     width: 90%;
-    border: solid 1px #ddd;
     margin: 0 auto;
-    background: #3ac7fe;
-    border: solid 10px;
     min-height: 350px;
     font-family: sans-serif;
     padding: 20px;
@@ -33,7 +30,7 @@ main {
     border-radius: 0px;
 }
 
-.btn:hover {
+.btn:hover, .game-btn:hover {
     background: dodgerblue;
 }
 
@@ -42,6 +39,7 @@ header h1 {
     background: black;
     color: white;
     font-family: sans-serif;
+    text-align: center;
 }
 
 main .game-options {
@@ -75,8 +73,8 @@ main .card:first-child {
 
 main .status {
     display: inline-block;
-    background: gold;
-    border: solid 5px white;
+    background: white;
+    border: solid 2px black;
     border-radius: 10px;
     padding: 5px 20px;
     margin: 0 auto;
@@ -91,20 +89,14 @@ main #status {
     width: 80%;
     margin: 0;
     margin-top: 20px;
-    font-size: 15pt;
-    font-weight: bold;
-    text-align: center;
     display: grid;
     gap: 10px;
-    background-color: #2196F3;
     padding: 10px;
 }
 
 .grid-item {
     background-color: rgba(255, 255, 255, 0.8);
-    text-align: center;
     padding: 20px;
-    font-size: 30px;
 }
 
 .player0 {
@@ -177,10 +169,19 @@ main #status {
 }
 
 .points {
-    text-align: center;
+    text-align: right;
     font-size: 12pt;
     font-weight: bold;
     margin: 10px;
+    float: right;
+}
+
+.name {
+    text-align: left;
+    font-size: 16pt;
+    font-weight: bold;
+    margin: 10px;
+    float: left;
 }
 
 .draw {
@@ -256,10 +257,32 @@ main .card .weight {
 
 #color-buttons {
     display: none;
+    text-align: center;
+    justify-content: center;
+    padding: 10px;
+}
+
+#btnYellow {
+    background-color: #FFAA01;
+}
+
+#btnGreen {
+    background-color: #55AA55;
+}
+
+#btnBlue {
+    background-color: #5455FF;
+}
+
+#btnRed {
+    background-color: #FF5555;
 }
 
 #uno-buttons {
     display: none;
+    text-align: center;
+    justify-content: center;
+    padding: 10px;
 }
 
 .game-btn {
