@@ -35,12 +35,8 @@ socket.on('gameStarted', function(players) {
 });
 
 socket.on('newPlayer', function(playersInLobby) {
-    document.getElementById('playerList').innerHTML = "<strong>Players: </strong>" + playersInLobby.join(', ');
+    document.getElementById('playerList').innerHTML = "<strong>Players:</strong> " + playersInLobby.join(', ');
     players = playersInLobby.length;
-});
-
-socket.on('yourTurn', function(PlayerID) {
-    document.getElementById('player_' + PlayerID).classList.add('active');
 });
 
 socket.on('chooseColor', function() {
@@ -55,9 +51,11 @@ socket.on('hideColor', function() {
     document.getElementById('discard').style.background="white";
 });
 
-socket.on('notYourTurn', function(PlayerID) {
-    document.getElementById('player_' + PlayerID).classList.remove('active');
-    document.getElementById('btnDraw').style.display="none";
+socket.on('turnChange', function(PlayerID) {
+    for(let i = 0; i < players; i++) {
+        document.getElementById('player_' + i).classList.remove('active');
+    }
+    document.getElementById('player_' + PlayerID).classList.add('active');
 });
 
 socket.on('canDrawCard', function() {

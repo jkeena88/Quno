@@ -387,7 +387,7 @@ function checkForWin(SocketID) {
         var currentPlayerID = player.PlayerID;
         getPoints(players);
         io.emit('gameOver', player.Name);
-        io.emit('notYourTurn', currentPlayerID);
+        io.emit('turnChange', -1);
     }
 }
 
@@ -425,7 +425,6 @@ function nextTurn() {
     let player = players.get(currentPlayer);
     var currentPlayerID = player.PlayerID;
 
-    io.to(currentPlayer).emit('notYourTurn', currentPlayerID);
     currentPlayerID += playDirection;
 
     if(currentPlayerID < 0) {
@@ -451,7 +450,7 @@ function nextTurn() {
         io.to(currentPlayer).emit('notCalledUnoMe');
     }
 
-    io.to(currentPlayer).emit('yourTurn', currentPlayerID);
+    io.emit('turnChange', currentPlayerID);
 }
 
 function canPlay(currentPlayer, invalidCards) {
@@ -493,5 +492,5 @@ function startGame() {
         io.to(currentPlayer).emit('canDrawCard');
     }
     
-    io.to(currentPlayer).emit('yourTurn', currentPlayerID);
+    io.emit('turnChange', currentPlayerID);
 }
