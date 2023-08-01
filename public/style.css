@@ -122,6 +122,19 @@ main #status {
 .playArea1 {
     grid-column: 3 / span 2;
     grid-row: 2 / span 2;
+    position: relative;
+    min-width: var(--card-width);
+    min-height: var(--card-height);
+}
+
+.playArea1 .pile {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: var(--card-width);
+    height: var(--card-height);
+    border-radius: 15px;
     background-image: url(images/quno.png);
     background-size: contain;
     background-repeat: no-repeat;
