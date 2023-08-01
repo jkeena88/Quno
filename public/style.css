@@ -100,22 +100,22 @@ main #status {
     background-color: rgb(184, 184, 184);
 }
 
-.player0 {
+#player0 {
     grid-column: 2 / span 2;
     grid-row: 1;
 }
 
-.player1 {
+#player1 {
     grid-column: 4 / span 2;
     grid-row: 1;
 }
 
-.player2 {
+#player2 {
     grid-column: 6 / span 2;
     grid-row: 1;
 }
 
-.player3 {
+#player3 {
     grid-column: 1 / span 2;
     grid-row: 2;
 }
@@ -147,17 +147,17 @@ main #status {
     grid-row: 2 / span 2;
 }
 
-.player4 {
+#player4 {
     grid-column: 7 / span 2;
     grid-row: 2;
 }
 
-.player5 {
+#player5 {
     grid-column: 1 / span 2;
     grid-row: 3;
 }
 
-.player6 {
+#player6 {
     grid-column: 7 / span 2;
     grid-row: 3;
 }
@@ -165,6 +165,10 @@ main #status {
 .playerSelf {
     grid-column: 2 / span 6;
     grid-row: 4;
+}
+
+.playerOpponent .card {
+    margin-left: -99px;
 }
 
 .player {

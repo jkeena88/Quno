@@ -30,7 +30,6 @@ socket.on('gameStarted', function(players) {
         }
     }
 
-    console.log(players);
     createPlayersUI(players);
 });
 
@@ -79,7 +78,6 @@ socket.on('gameOver', function(playerName) {
     document.getElementById("status").style.display="inline-block";
 
     if(isPlayerA) {
-        console.log(isPlayerA);
         document.getElementById("btnDeal").style.display="inline-block";
     }
 });
@@ -128,11 +126,13 @@ function repositionCards(player) {
     var hand = document.getElementById('hand_' + player.PlayerID);
     var cardCount = hand.children.length;
 
-    for(var i = 0; i < cardCount; i++) {
-        var cardElement = hand.children[i];
-        var marginLeft = i === 0 ? '-20' : -5 * (cardCount - 1) + 5;
-        if(marginLeft < -59){marginLeft = -59;}
-        cardElement.style.marginLeft = marginLeft + 'px';
+    if(player.SocketID == socketId) {
+        for(var i = 0; i < cardCount; i++) {
+            var cardElement = hand.children[i];
+            var marginLeft = i === 0 ? '-20' : -5 * (cardCount - 1) + 5;
+            if(marginLeft < -59){marginLeft = -59;}
+            cardElement.style.marginLeft = marginLeft + 'px';
+        }
     }
 }
 
