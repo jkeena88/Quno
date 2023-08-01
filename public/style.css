@@ -145,6 +145,13 @@ main #status {
 .playArea2 {
     grid-column: 5 / span 2;
     grid-row: 2 / span 2;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.playArea2 .discard {
+    text-align: center;
 }
 
 #player4 {
@@ -199,7 +206,6 @@ main #status {
 }
 
 .discard {
-    float: right;
     background: white;
     color: #222;
     padding: 10px;
