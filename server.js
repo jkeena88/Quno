@@ -448,6 +448,7 @@ function nextTurn() {
         io.to(currentPlayer).emit('notCalledUnoMe');
     }
 
+    requiredPlay = new Array();
     io.emit('turnChange', currentPlayerID);
 }
 
