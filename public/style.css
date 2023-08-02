@@ -51,7 +51,6 @@ main .card {
     width: var(--card-width);
     height: var(--card-height);
     padding: 5px;
-    background-color: none;
     display: inline-block;
     border-radius: 15px;
     font-size: 10pt;
@@ -145,13 +144,10 @@ main #status {
 .playArea2 {
     grid-column: 5 / span 2;
     grid-row: 2 / span 2;
-    display: flex;
+    display: grid;
+    grid-template-rows: auto 20px;
     justify-content: center;
     align-items: center;
-}
-
-.playArea2 .discard {
-    text-align: center;
 }
 
 #player4 {
@@ -199,7 +195,7 @@ main #status {
 
 .name {
     text-align: left;
-    font-size: 16pt;
+    font-size: 12pt;
     font-weight: bold;
     margin: 10px;
     float: left;
@@ -211,10 +207,24 @@ main #status {
     padding: 10px;
     border-radius: 10px;
     border: 2px;
-    width: 60px;
-    height: 100px;
     font-size: 12pt;
     display: none;
+    text-align: center;
+}
+
+#discard {
+    width: var(--card-width);
+    height: var(--card-height);
+    zoom: 0.9;
+    -moz-transform: scale(0.9);
+}
+
+#color-bar {
+    width: var(--card-width);
+    height: 20px;
+    background: rgb(184, 184, 184);
+    padding-bottom: 10px;
+    transform: translate(0%, -50%);
 }
 
 main .player .hand {
@@ -223,19 +233,6 @@ main .player .hand {
     align-items: flex-start;
     position: relative;
     padding-left: 20px;
-}
-
-main .card .value {
-    font-size: 15pt;
-    font-family: sans-serif;
-    font-weight: bold;
-    color: white;
-}
-
-main .card .color {
-    height: 100%;
-    width: 100%;
-    border-radius: 10px;
 }
 
 #color-buttons {

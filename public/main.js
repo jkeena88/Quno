@@ -43,11 +43,11 @@ socket.on('chooseColor', function() {
 });
 
 socket.on('colorChosen', function(color) {
-    document.getElementById('discard').style.background=color;
+    document.getElementById('color-bar').style.background=color;
 });
 
 socket.on('hideColor', function() {
-    document.getElementById('discard').style.background="white";
+    document.getElementById('color-bar').style.background="rgb(184, 184, 184)";
 });
 
 socket.on('turnChange', function(PlayerID) {
@@ -144,14 +144,14 @@ function playCard(card, player) {
 
 socket.on('discardCard', function(card, player) {
     var cardObj = getCardUI(card);
-    cardObj.id = 'discard-top';
+    cardObj.id = 'discard';
 
     if(player != null) {
         document.getElementById('card_' + card).remove();
         repositionCards(player);
     }
 
-    var discard = document.getElementById('discard-top');
+    var discard = document.getElementById('discard');
     discard.parentNode.replaceChild(cardObj, discard);
 });
 

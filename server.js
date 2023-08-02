@@ -108,11 +108,10 @@ function onConnection(socket) {
             if((colorMatch || typeMatch || wild || draw4wild) && (requiredPlay.length == 0 || requiredPlay.includes(playType))) {
                 requiredPlay = new Array();
                 discardCard(card, socket.id);
+                io.emit('hideColor');
 
                 checkForWin(socket.id);
 
-                io.emit('hideColor');
-                
                 if(playType == 'wild') {
                     io.to(socket.id).emit('chooseColor');
                 } else if(playType == 'draw4') {
@@ -384,7 +383,6 @@ function checkForWin(SocketID) {
 
     if(player.Hand.length == 0) {
         let player = players.get(currentPlayer);
-        var currentPlayerID = player.PlayerID;
         getPoints(players);
         io.emit('gameOver', player.Name);
         io.emit('turnChange', -1);
@@ -473,6 +471,12 @@ function canPlay(currentPlayer, invalidCards) {
 }
 
 function startGame() {
+
+    playDirection = 1;
+    cardsToDraw = 0;
+    discardPile = new Array();
+    requiredPlay = new Array();
+    io.emit('hideColor');
 
     var currentPlayerID = Math.floor(Math.random() * players.size);
 
