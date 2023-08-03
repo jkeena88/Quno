@@ -275,9 +275,6 @@ main .player .hand {
 
 #options {
     display: none;
-}
-
-#options {
     background: white;
     border: 2px solid black;
     border-radius: 10px;

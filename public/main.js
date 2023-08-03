@@ -13,76 +13,94 @@ let isPlayerA = false;
 socket.on('connect', requestJoin);
 
 socket.on('isPlayerA', function() {
+    // Show game controls to the first player to join
     isPlayerA = true;
     document.getElementById('btnStart').style.display="inline-block";
     document.getElementById('btnOptions').style.display="inline-block";
 });
 
 socket.on('gameStarted', function(players) {
+    // Show/hide elements for in-game state
     document.getElementById("status").style.display="none";
     document.getElementById('btnDeal').style.display="none";
     document.getElementById('uno-buttons').style.display="flex";
     document.getElementById('discard').style.display="inline-block";
 
+    // Get this player's ID
     for(var i = 0; i < players.length; i++) {
         if(players[i].SocketID == socketId) {
             playerId = players[i].PlayerID;
         }
     }
 
+    // Display players
     createPlayersUI(players);
 });
 
 socket.on('newPlayer', function(playersInLobby) {
+    // Update the list and count of players
     document.getElementById('playerList').innerHTML = "<strong>Players:</strong> " + playersInLobby.join(', ');
     players = playersInLobby.length;
 });
 
 socket.on('chooseColor', function() {
+    // Display the buttons to let the player pick a color after wild
     document.getElementById('color-buttons').style.display="flex";
 });
 
 socket.on('colorChosen', function(color) {
+    // Display which color was selected after a wild
     document.getElementById('color-bar').style.background=color;
 });
 
 socket.on('hideColor', function() {
+    // Hide the color bar now that we've moved past the wild
     document.getElementById('color-bar').style.background="rgb(184, 184, 184)";
 });
 
 socket.on('turnChange', function(PlayerID) {
+    // Mark all players as inactive
     for(let i = 0; i < players; i++) {
         document.getElementById('player_' + i).classList.remove('active');
     }
+
+    // Mark the player whose turn it is as active
     document.getElementById('player_' + PlayerID).classList.add('active');
 });
 
 socket.on('canDrawCard', function() {
+    // If the player needs to draw a card, display the draw button
     document.getElementById('btnDraw').style.display="inline-block";
 });
 
 socket.on('calledUnoMe', function() {
+    // If the player has already called Uno, gray the Uno button out
     document.getElementById('btnUnoMe').style.background="gray";
 });
 
 socket.on('notCalledUnoMe', function() {
+    // If the player hasn't already called Uno, make the button not grayed out
     document.getElementById('btnUnoMe').style.background="#222";
 });
 
 socket.on('updateScore', function(player, points) {
+    // Update the points of the player who won the game
     document.getElementById('points_' + player).innerHTML = points;
 });
 
 socket.on('gameOver', function(playerName) {
+    // Display a winner message
     document.getElementById('status').innerHTML = playerName + ' WON';
     document.getElementById("status").style.display="inline-block";
 
+    // Display the deal button to the player in control of the game
     if(isPlayerA) {
         document.getElementById("btnDeal").style.display="inline-block";
     }
 });
 
 socket.on('renderCard', function(card, player) {
+    // Display a card
     var hand = document.getElementById('hand_' + player.PlayerID);
     var cardObj = getCardUI(card, player);
 
@@ -92,20 +110,26 @@ socket.on('renderCard', function(card, player) {
 });
 
 function getCardUI(card, player) {
+    // Get card image
     var cardObj = document.createElement('div');
 
     cardObj.className = 'card';
     cardObj.id = 'card_' + card;
     
+    // Discard pile or the player
     if(player == null || player.SocketID == socketId) {
+
+        // Get card image from sprite sheet
         const offsetX = 2 + 1680 - cdWidth * (card % 14);
         const offsetY = 1440 - cdHeight * Math.floor(card / 14);
         cardObj.style.backgroundImage = 'url(' + cards.src + ')';
         cardObj.style.backgroundPosition = `${offsetX}px ${offsetY}px`;
 
         if(player != null) {
+            // Make the card clickable if it's for the player
             cardObj.addEventListener('click', () => playCard(card, player));
 
+            // Bump cards up on the screen when they're hovered over
             cardObj.addEventListener('mouseenter', function () {
             cardObj.style.transform = 'translateY(-50px)';
             });
@@ -115,6 +139,7 @@ function getCardUI(card, player) {
             });
         }
     } else {
+        // Display back of card for opponent cards
         cardObj.style.backgroundImage = 'url(' + back.src + ')';
         cardObj.style.backgroundSize = '100%';
     }
@@ -123,12 +148,15 @@ function getCardUI(card, player) {
 }
 
 function repositionCards(player) {
+    // Adjust card positioning as new cards get added to a hand
     var hand = document.getElementById('hand_' + player.PlayerID);
     var cardCount = hand.children.length;
 
     if(player.SocketID == socketId) {
         for(var i = 0; i < cardCount; i++) {
             var cardElement = hand.children[i];
+
+            // As more cards as drawn, overlap them more
             var marginLeft = i === 0 ? '-20' : -5 * (cardCount - 1) + 5;
             if(marginLeft < -59){marginLeft = -59;}
             cardElement.style.marginLeft = marginLeft + 'px';
@@ -137,15 +165,19 @@ function repositionCards(player) {
 }
 
 function playCard(card, player) {
+    // Attempt to play a card
     socket.emit('playCard', card);
 
     repositionCards(player);
 }
 
 socket.on('discardCard', function(card, player) {
+    // Add a card to the discard pile
     var cardObj = getCardUI(card);
     cardObj.id = 'discard';
 
+    // If it's a real player
+    // Basically just ignores the initial discard after a new deal
     if(player != null) {
         document.getElementById('card_' + card).remove();
         repositionCards(player);
@@ -156,24 +188,33 @@ socket.on('discardCard', function(card, player) {
 });
 
 function init() {
+    // Load initial state
     cards.src = 'images/deck_full.png';
     back.src = 'images/quno.png';
   
+    // Get the player name
     playerName = getCookie('playerName');
     if(playerName == null) {
+        // Default autogenerated name
         let defaultName = 'Player' + Math.floor(1000 + Math.random() * 9000);
+
+        // Prompt player for a new name
         playerName = prompt('Enter your name: ', defaultName);
+
         if (playerName === null || playerName === "") {
             playerName = defaultName;
         } else {
+            // Save the name in a cookie
             setCookie('playerName', playerName, 24 * 3600);
         }
     }
   
+    // Connect to the server
     socket.connect();
 }
 
 function setCookie(name, value, seconds) {
+    // Save a cookie with the player name
     let date = new Date();
     date.setTime(date.getTime() + (seconds * 1000));
     let expires = "expires=" + date.toUTCString();
@@ -181,6 +222,7 @@ function setCookie(name, value, seconds) {
 }
 
 function getCookie(name) {
+    // Get the player name from a cookie if it exists
     name += "=";
     let cookies = document.cookie.split(';');
     for(let i = 0; i < cookies.length; i++) {
@@ -196,29 +238,35 @@ function getCookie(name) {
 }
 
 function requestJoin() {
+    // Try to join the game
     socketId = socket.id;
     socket.emit('requestJoin', playerName);
 }
 
 function resetGame() {
+    // Start a new match
     socket.emit('resetGame');
 }
 
 function newHand() {
+    // Deal a new hand within the same match
     socket.emit('newHand');
 }
 
 function drawCard() {
+    // Draw a card
     document.getElementById('btnDraw').style.display="none";
     socket.emit('drawCard');
 }
 
 function setColor(color) {
+    // Set a new color after a color button has been clicked after a wild
     document.getElementById('color-buttons').style.display="none";
     socket.emit('colorChosen', color);
 }
 
 function createPlayersUI(players) {
+    // Display the players
     document.getElementById('player0').innerHTML = '';
     document.getElementById('player1').innerHTML = '';
     document.getElementById('player2').innerHTML = '';
@@ -249,8 +297,10 @@ function createPlayersUI(players) {
         div_player.appendChild(div_points);
 
         if(players[i].SocketID == socketId) {
+            // Add the player to the bottom of the screen
             document.getElementById('playerSelf').appendChild(div_player);
         } else {
+            // Add opponents to spots around the table based on player order in the game
             let player_location = playerId - players[i].PlayerID;
 
             if(player_location < 0) {
@@ -287,18 +337,22 @@ function createPlayersUI(players) {
 }
 
 function unoMe() {
+    // Send a message that the player called uno
     socket.emit('unoMe');
 }
 
 function unoYou() {
+    // Send a message that the player called uno on someone else
     socket.emit('unoYou');
 }
 
 function showOptions() {
+    // Display the game options
     document.getElementById('options').style.display = 'flex';
 }
 
 function saveOptions() {
+    // Save the chosen game options and send to the server
     document.getElementById('options').style.display = 'none';
     let checkboxes = document.querySelectorAll('#options input[type="checkbox"]:checked');
     let selectedValues = Array.from(checkboxes).map(checkbox => checkbox.value);

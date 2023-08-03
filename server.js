@@ -35,11 +35,13 @@ let requiredPlay = new Array();
  */
 function onConnection(socket) {
 
+    // If there's no primary player, make the new player primary
     if(playerA == null) {
         playerA = socket.id;
         io.to(socket.id).emit('isPlayerA');
     }
 
+    // Remove a player if they leave
     socket.on('disconnect', () => {
         if(socket.id == playerA) {
             playerA = null;
@@ -50,10 +52,10 @@ function onConnection(socket) {
 
     /**
      * Whenever a room is requested, looks for a slot for the player,
-     * up to 10 players in a room, maxRooms and started games are respected.
+     * up to 8 players in a room
      * @method
      * @param {String} playerName Player name
-     * @return responseRoom with name of the room, otherwise error.
+     * @return responseRoom and # of players if there's an open slot, otherwise error.
      */
     socket.on('requestJoin', function(playerName) {
         socket.playerName = playerName;
@@ -64,6 +66,7 @@ function onConnection(socket) {
             people = 0;
         }
 
+        // Add the player to the game if there's enough room
         if(people < maxPlayers) {
             socket.join();
             playersInLobby.push(playerName);
@@ -72,11 +75,13 @@ function onConnection(socket) {
 
             return;
         } else {
+            // Room is full, send an error
             io.to(socket.id).emit('responseRoom', 'error');
         }
     });
 
     socket.on('resetGame', function() {
+        // Start a new match if there's more than 1 player
         var playerCount = io.engine.clientsCount;
 
         if(playerCount > 1) {
@@ -86,13 +91,16 @@ function onConnection(socket) {
     });
 
     socket.on('newHand', function() {
+        // Deal a new hand without resetting the players
         startGame();
     });
 
     socket.on('playCard', function(card) {
+        // Attempt to play a card
         let playColor = cardColor(card);
         let playType = cardType(card);
 
+        // Only let someone play if it's their turn
         if(socket.id == currentPlayer) {
 
             let colorMatch = (playColor == currentColor && playColor != 'black');
@@ -100,39 +108,53 @@ function onConnection(socket) {
             let wild = (playType == 'wild');
 
             if(playWildDraw4) {
+                // If 'play draw 4 any time' is enabled, let them play it
                 var draw4wild = (playType == 'draw4');
             } else {
+                // If 'play draw 4 any time' is disabled, make sure it's their only playable card first
                 var draw4wild = (playType == 'draw4' && !canPlay(currentPlayer, ['draw4']));
             }
 
+            // Let them play if they have the right color or card value, or if it's a wild
+            // In some scenarios, like stacking draw 2s, there's another check to see if there's a certain requirement for the next play
             if((colorMatch || typeMatch || wild || draw4wild) && (requiredPlay.length == 0 || requiredPlay.includes(playType))) {
                 requiredPlay = new Array();
                 discardCard(card, socket.id);
                 io.emit('hideColor');
 
+                // See if the player won after playing their card
                 checkForWin(socket.id);
 
                 if(playType == 'wild') {
+                    // Wild - have the player choose a new color
                     io.to(socket.id).emit('chooseColor');
                 } else if(playType == 'draw4') {
+                    // Wild draw 4 - queue up 4 more cards to be drawn, then have the player choose a new color
                     cardsToDraw += 4;
                     io.to(socket.id).emit('chooseColor');
                 } else if(playType == 'skip') {
+                    // Skip - jump over the next player
                     nextTurn();
+
+                    // If there are cards remaining to be drawn (e.g. a skip was played on a draw 2) then draw those cards
                     drawCard(currentPlayer, cardsToDraw);
                     nextTurn();
                 } else if(playType == 'reverse') {
+                    // Reverse - change the direction of play
                     playDirection = -playDirection;
                     nextTurn();
 
+                    // If there are cards remaining to be drawn (e.g. a reverse was played on a draw 2) then draw those cards
                     if(cardsToDraw > 0) {
                         drawCard(currentPlayer, cardsToDraw);
                         nextTurn();
                     }
                 } else if(playType == 'draw2') {
+                    // Draw 2 - queue up 2 more cards to be drawn
                     cardsToDraw += 2;
                     nextTurn();
 
+                    // Check all the game options for playing on draw 2s
                     if(stackDraw2) {
                         requiredPlay.push('draw2');
                     }
@@ -145,6 +167,7 @@ function onConnection(socket) {
                         requiredPlay.push('reverse');
                     }
 
+                    // See whether the next player has any cards they can stack
                     let tempArray = cardList.filter(item => !requiredPlay.includes(item));
 
                     if(!canPlay(currentPlayer, tempArray)) {
@@ -152,6 +175,7 @@ function onConnection(socket) {
                         nextTurn();
                     }
                 } else {
+                    // Any numbered card - just move to the next turn
                     nextTurn();
                 }
             }
@@ -159,16 +183,20 @@ function onConnection(socket) {
     });
 
     socket.on('drawCard', function() {
+        // Draw a card
         drawCard(socket.id, 1);
     });
 
     socket.on('colorChosen', function(color) {
+        // A new color was chosen
         io.emit('colorChosen', color);
         currentColor = color;
         nextTurn();
         
+        // For handling wild draw 4
         if(cardsToDraw > 0) {
 
+            // Let the player stack a draw 4 if they can
             if(stackDraw4) {
                 requiredPlay.push('draw4');
             }
@@ -183,8 +211,10 @@ function onConnection(socket) {
     });
 
     socket.on('unoMe', function() {
+        // Player called Uno
         let player = players.get(socket.id);
 
+        // Only let them call it if it's their turn and they have 2 cards, or if it's not their turn and they have 1 card
         if((player.Hand.length <= 2 && socket.id == currentPlayer) || player.Hand.length == 1) {
             player.HasCalledUno = true;
             io.to(socket.id).emit('calledUnoMe');
@@ -192,14 +222,19 @@ function onConnection(socket) {
     });
 
     socket.on('unoYou', function() {
+        // Player called Uno on someone else
+
+        // Iterate through all players and see if they have 1 card + haven't called Uno
         players.forEach((player) => {
             if(player.Hand.length == 1 && player.HasCalledUno == false) {
+                // Draw cards if they're caught
                 drawCard(player.SocketID, 4);
             };
         });
     });
 
     socket.on('saveOptions', (data) => {
+        // Save the selected game options
         let selectedOptions = data.options;
 
         if(selectedOptions.includes('playWildDraw4')) {
@@ -235,6 +270,7 @@ function onConnection(socket) {
 }
 
 function cardColor(card) {
+    // Look up the card's color based on position in the sprite sheet
     let color;
 
     if(card % 14 === 13) {
@@ -264,6 +300,7 @@ function cardColor(card) {
 }
 
 function cardType(card) {
+    // Look up the card's type based on position in the sprite sheet
     switch(card % 14) {
         case 10: // Skip
             return 'skip';
@@ -283,6 +320,7 @@ function cardType(card) {
 }
 
 function cardValue(card) {
+    // Look up the card's point value (for end-game scoring) based on position in the sprite sheet
     let points;
     switch(card % 14) {
         case 10: // Skip
@@ -301,6 +339,7 @@ function cardValue(card) {
 }
 
 function createPlayers() {
+    // Create new players
     players.clear();
     var i = 0;
 
@@ -313,11 +352,13 @@ function createPlayers() {
 };
 
 function createDeck() {
+    // Create a new deck
     deck = Array.from(Array(112), (_, i) => i);
     shuffle(deck);
 }
 
 function shuffle(deck) {
+    // Shuffle the deck
     let i, j, temp;
     for(i = deck.length - 1; i > 0; i--) {
         j = Math.floor(Math.random() * (i + 1));
@@ -328,6 +369,7 @@ function shuffle(deck) {
 }
 
 function dealHands() {
+    // Deal new cards to every player
     for(var i = 0; i < 7; i++) {
         players.forEach((player) => {
             var card = deck.pop();
@@ -337,20 +379,26 @@ function dealHands() {
     }
 
     do {
+        // Discard 1 card to start the game until we start on something other than a wild
         card = deck.pop();
         discardCard(card, -1);
     } while(currentColor == 'black')
 }
 
 function drawCard(SocketID, num) {
+    // Draw card(s)
     let player = players.get(SocketID);
+
+    // After drawing reset their Uno status
     player.HasCalledUno = false;
     io.to(SocketID).emit('notCalledUnoMe');
 
     var numRemaining = num;
 
+    // Keep drawing as many cards as required
     while(numRemaining > 0) {
         if(deck.length < 1) { 
+            // Reshuffle deck/dicard pile if the deck runs out
             var tempCard = discardPile.pop();
             deck = discardPile;
             discardPile = new Array();
@@ -368,6 +416,8 @@ function drawCard(SocketID, num) {
         }
     }
 
+    // If the original # of cards to be drawn was 1 that means it was the player's turn and they had nothing to play
+    // If they still can't play, draw another card
     if(num == 1) {
         let hasCard = canPlay(currentPlayer, ['none']);
         if(!hasCard) {
@@ -379,40 +429,52 @@ function drawCard(SocketID, num) {
 }
 
 function checkForWin(SocketID) {
+    // Check if the player won
     let player = players.get(SocketID);
 
     if(player.Hand.length == 0) {
+        // They win if they have 0 cards left
         let player = players.get(currentPlayer);
+
+        // Tally up points
         getPoints(players);
+
+        // Let everyone know the game's over
         io.emit('gameOver', player.Name);
         io.emit('turnChange', -1);
     }
 }
 
 function getPoints(players) {
+    // Tally up points
     var points = 0;
 
+    // Count value of cards in each player's hand
     players.forEach((player) => {
         player.Hand.forEach((card) => {
             points += cardValue(card);
         });
     });
 
+    // Update the scores
     var player = players.get(currentPlayer);
     player.Points += points;
     io.emit('updateScore', player.PlayerID, player.Points);
 }
 
 function discardCard(card, SocketID) {
+    // Add a card to the discard pile
 
     let player;
 
     if(SocketID != -1) {
+        // If it's a real player (e.g. not dealing a card to the discard pile) then remove the card from their hand
         player = players.get(SocketID);
         let cardIndex = player.Hand.indexOf(card);
         player.Hand.splice(cardIndex, 1);
     }
 
+    // Add the card to the discard pile and update the game's current color/card type
     discardPile.push(card);
     currentColor = cardColor(card);
     currentType = cardType(card);
@@ -420,11 +482,13 @@ function discardCard(card, SocketID) {
 }
 
 function nextTurn() {
+    // Switch to the next player's turn
     let player = players.get(currentPlayer);
     var currentPlayerID = player.PlayerID;
 
     currentPlayerID += playDirection;
 
+    // Players are numbered from 0 to n. Loop around if we iterate outside of the 0 to n range.
     if(currentPlayerID < 0) {
         currentPlayerID += players.size;
     } else if(currentPlayerID >= players.size) {
@@ -437,6 +501,7 @@ function nextTurn() {
         }
     });
 
+    // Draw a card if the next player can't play anything
     let hasCard = canPlay(currentPlayer, ['none']);
     if(!hasCard) {
         io.to(currentPlayer).emit('canDrawCard');
@@ -444,6 +509,7 @@ function nextTurn() {
 
     player = players.get(currentPlayer);
 
+    // If the next player has 2 or fewer cards, let them call Uno
     if(player.Hand.length <= 2) {
         io.to(currentPlayer).emit('notCalledUnoMe');
     }
@@ -453,14 +519,18 @@ function nextTurn() {
 }
 
 function canPlay(currentPlayer, invalidCards) {
+    // Check if the player is able to play a card, excluding some invalidCards
     let player = players.get(currentPlayer);
     let hasCard = false;
     
     player.Hand.forEach((card) => {
+        // Check every card in the hand
         let playColor = cardColor(card);
         let playType = cardType(card);
 
         if(!invalidCards.includes(playType)) {
+            // Make sure card isn't in the invalid list
+            // If the card is wild or matches the current color or type, it's playable
             if(playColor == currentColor || playColor == 'black' || playType == currentType) {
                 hasCard = true;
                 return hasCard;
@@ -472,15 +542,19 @@ function canPlay(currentPlayer, invalidCards) {
 }
 
 function startGame() {
+    // Start a new game
 
+    // Reset some game variables
     playDirection = 1;
     cardsToDraw = 0;
     discardPile = new Array();
     requiredPlay = new Array();
     io.emit('hideColor');
 
+    // Randomly select a new player to play first
     var currentPlayerID = Math.floor(Math.random() * players.size);
 
+    // Reset each player's hand
     players.forEach((player) => {
         player.Hand = [];
         if(player.PlayerID == currentPlayerID) {
@@ -488,14 +562,17 @@ function startGame() {
         }
     });
 
+    // Tell everyone a new game is started, make a new deck, and deal new hands
     io.emit('gameStarted', Array.from(players.values()));
     createDeck();
     dealHands();
 
+    // Check that the first player can play a card, or have them draw 1
     let hasCard = canPlay(currentPlayer, ['none']);
     if(!hasCard) {
         io.to(currentPlayer).emit('canDrawCard');
     }
     
+    // Mark the first player as active
     io.emit('turnChange', currentPlayerID);
 }
