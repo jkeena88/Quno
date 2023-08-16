@@ -73,6 +73,7 @@ function onConnection(socket) {
             playersInLobby.push(playerName);
             io.to(socket.id).emit('responseRoom', [people + 1, maxPlayers]);
             io.emit('newPlayer', playersInLobby);
+            io.emit('logMessage', playerName + ' joined the game');
 
             return;
         } else {
@@ -86,6 +87,7 @@ function onConnection(socket) {
         var playerCount = io.engine.clientsCount;
 
         if(playerCount > 1) {
+            io.emit('logMessage', 'A new match was started');
             createPlayers();
             startGame();
         }
@@ -93,6 +95,7 @@ function onConnection(socket) {
 
     socket.on('newHand', function() {
         // Deal a new hand without resetting the players
+        io.emit('logMessage', 'A new hand was dealt');
         startGame();
     });
 
@@ -122,6 +125,7 @@ function onConnection(socket) {
                 requiredPlay = new Array();
                 discardCard(card, socket.id);
                 io.emit('hideColor');
+                io.emit('logMessage', socket.playerName + ' played a ' + playColor + ' ' + playType);
 
                 // See if the player won after playing their card
                 checkForWin(socket.id);
@@ -192,6 +196,7 @@ function onConnection(socket) {
         // A new color was chosen
         io.emit('colorChosen', color);
         currentColor = color;
+        io.emit('logMessage', 'The color was changed to ' + color);
         nextTurn();
         
         // For handling wild draw 4
@@ -219,6 +224,7 @@ function onConnection(socket) {
         if((player.Hand.length <= 2 && socket.id == currentPlayer) || player.Hand.length == 1) {
             player.HasCalledUno = true;
             io.to(socket.id).emit('calledUnoMe');
+            io.emit('logMessage', socket.playerName + ' called Uno');
         }
     });
 
@@ -229,6 +235,7 @@ function onConnection(socket) {
         players.forEach((player) => {
             if(player.Hand.length == 1 && player.HasCalledUno == false) {
                 // Draw cards if they're caught
+                io.emit('logMessage', player.Name + ' had Uno called on them');
                 drawCard(player.SocketID, 4);
             };
         });
@@ -417,6 +424,15 @@ function drawCard(SocketID, num) {
         }
     }
 
+    if(num > 0) {
+        var label = ' cards';
+        if(num == 1){
+            label = ' card'
+        }
+
+        io.emit('logMessage', player.Name + ' drew ' + num + label);
+    }
+
     // If the original # of cards to be drawn was 1 that means it was the player's turn and they had nothing to play
     // If they still can't play, draw another card
     if(num == 1) {
@@ -444,6 +460,7 @@ function checkForWin(SocketID) {
         gameIsOver = true;
         io.emit('turnChange', -1);
         io.emit('gameOver', player.Name);
+        io.emit('logMessage', player.Name + ' won the game');
     }
 }
 

@@ -10,6 +10,13 @@ var players = 0;
 
 let isPlayerA = false;
 
+const sidePanel = document.getElementById('side-panel');
+const collapseButton = document.getElementById('collapse-btn');
+
+collapseButton.addEventListener('click', () => {
+    sidePanel.classList.toggle('collapsed');
+});
+
 socket.on('connect', requestJoin);
 
 socket.on('isPlayerA', function() {
@@ -118,6 +125,14 @@ socket.on('renderCard', function(card, player) {
     hand.appendChild(cardObj);
 
     repositionCards(player);
+});
+
+socket.on('logMessage', function(message) {
+    const messageContainer = document.getElementById('message-container');
+    const messageElement = document.createElement('div');
+    messageElement.classList.add('message');
+    messageElement.textContent = message;
+    messageContainer.insertBefore(messageElement, messageContainer.firstChild);
 });
 
 function getCardUI(card, player) {
