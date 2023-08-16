@@ -20,6 +20,9 @@ socket.on('isPlayerA', function() {
 });
 
 socket.on('gameStarted', function(players) {
+    var audio = new Audio('audio/game-start.wav');
+    audio.play();
+
     // Show/hide elements for in-game state
     document.getElementById("status").style.display="none";
     document.getElementById('btnDeal').style.display="none";
@@ -66,6 +69,11 @@ socket.on('turnChange', function(PlayerID) {
 
     // Mark the player whose turn it is as active
     document.getElementById('player_' + PlayerID).classList.add('active');
+
+    if(PlayerID == playerId) {
+        var audio = new Audio('audio/turn-change.wav');
+        audio.play();
+    }
 });
 
 socket.on('canDrawCard', function() {
@@ -89,6 +97,9 @@ socket.on('updateScore', function(player, points) {
 });
 
 socket.on('gameOver', function(playerName) {
+    var audio = new Audio('audio/game-over.wav');
+    audio.play();
+
     // Display a winner message
     document.getElementById('status').innerHTML = playerName + ' WON';
     document.getElementById("status").style.display="inline-block";

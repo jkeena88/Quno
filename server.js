@@ -24,6 +24,7 @@ let stackDraw2 = false;
 let skipDraw2 = false;
 let reverseDraw2 = false;
 let stackDraw4 = false;
+let gameIsOver = false;
 let cardList = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 'skip', 'reverse', 'draw2', 'wild', 'draw4']
 let requiredPlay = new Array();
 
@@ -440,8 +441,9 @@ function checkForWin(SocketID) {
         getPoints(players);
 
         // Let everyone know the game's over
-        io.emit('gameOver', player.Name);
+        gameIsOver = true;
         io.emit('turnChange', -1);
+        io.emit('gameOver', player.Name);
     }
 }
 
@@ -482,40 +484,42 @@ function discardCard(card, SocketID) {
 }
 
 function nextTurn() {
-    // Switch to the next player's turn
-    let player = players.get(currentPlayer);
-    var currentPlayerID = player.PlayerID;
+    if(!gameIsOver) {
+        // Switch to the next player's turn
+        let player = players.get(currentPlayer);
+        var currentPlayerID = player.PlayerID;
 
-    currentPlayerID += playDirection;
+        currentPlayerID += playDirection;
 
-    // Players are numbered from 0 to n. Loop around if we iterate outside of the 0 to n range.
-    if(currentPlayerID < 0) {
-        currentPlayerID += players.size;
-    } else if(currentPlayerID >= players.size) {
-        currentPlayerID -= players.size;
-    }
-
-    players.forEach((nextPlayer) => {
-        if(nextPlayer.PlayerID == currentPlayerID) {
-            currentPlayer = nextPlayer.SocketID;
+        // Players are numbered from 0 to n. Loop around if we iterate outside of the 0 to n range.
+        if(currentPlayerID < 0) {
+            currentPlayerID += players.size;
+        } else if(currentPlayerID >= players.size) {
+            currentPlayerID -= players.size;
         }
-    });
 
-    // Draw a card if the next player can't play anything
-    let hasCard = canPlay(currentPlayer, ['none']);
-    if(!hasCard) {
-        io.to(currentPlayer).emit('canDrawCard');
+        players.forEach((nextPlayer) => {
+            if(nextPlayer.PlayerID == currentPlayerID) {
+                currentPlayer = nextPlayer.SocketID;
+            }
+        });
+
+        // Draw a card if the next player can't play anything
+        let hasCard = canPlay(currentPlayer, ['none']);
+        if(!hasCard) {
+            io.to(currentPlayer).emit('canDrawCard');
+        }
+
+        player = players.get(currentPlayer);
+
+        // If the next player has 2 or fewer cards, let them call Uno
+        if(player.Hand.length <= 2) {
+            io.to(currentPlayer).emit('notCalledUnoMe');
+        }
+
+        requiredPlay = new Array();
+        io.emit('turnChange', currentPlayerID);
     }
-
-    player = players.get(currentPlayer);
-
-    // If the next player has 2 or fewer cards, let them call Uno
-    if(player.Hand.length <= 2) {
-        io.to(currentPlayer).emit('notCalledUnoMe');
-    }
-
-    requiredPlay = new Array();
-    io.emit('turnChange', currentPlayerID);
 }
 
 function canPlay(currentPlayer, invalidCards) {
@@ -545,6 +549,7 @@ function startGame() {
     // Start a new game
 
     // Reset some game variables
+    gameIsOver = false;
     playDirection = 1;
     cardsToDraw = 0;
     discardPile = new Array();
