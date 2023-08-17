@@ -441,7 +441,7 @@ function drawCard(SocketID, num) {
         }
 
         io.emit('logMessage', player.Name + ' drew ' + num + label);
-        io.to(currentPlayer).emit('hideDraw');
+        io.to(SocketID).emit('hideDraw');
     }
 
     // If the original # of cards to be drawn was 1 that means it was the player's turn and they had nothing to play
@@ -583,6 +583,7 @@ function startGame() {
     discardPile = new Array();
     requiredPlay = new Array();
     io.emit('notCalledUnoMe');
+    io.emit('colorChosen', 'red');
     io.emit('hideColor');
     io.emit('hideDraw');
 
