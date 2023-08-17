@@ -140,14 +140,14 @@ function getCardUI(card, player) {
     var cardObj = document.createElement('div');
 
     cardObj.className = 'card';
-    cardObj.id = 'card_' + card;
+    cardObj.id = 'card_' + card.ID;
     
     // Discard pile or the player
     if(player == null || player.SocketID == socketId) {
 
         // Get card image from sprite sheet
-        const offsetX = 2 + 1680 - cdWidth * (card % 14);
-        const offsetY = 1440 - cdHeight * Math.floor(card / 14);
+        const offsetX = 2 + 1680 - cdWidth * (card.ID % 14);
+        const offsetY = 1440 - cdHeight * Math.floor(card.ID / 14);
         cardObj.style.backgroundImage = 'url(' + cards.src + ')';
         cardObj.style.backgroundPosition = `${offsetX}px ${offsetY}px`;
 
@@ -205,12 +205,16 @@ socket.on('discardCard', function(card, player) {
     // If it's a real player
     // Basically just ignores the initial discard after a new deal
     if(player != null) {
-        document.getElementById('card_' + card).remove();
+        document.getElementById('card_' + card.ID).remove();
         repositionCards(player);
     }
 
     var discard = document.getElementById('discard');
     discard.parentNode.replaceChild(cardObj, discard);
+});
+
+socket.on('hideDraw', function() {
+    document.getElementById('btnDraw').style.display="none";
 });
 
 function init() {

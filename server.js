@@ -101,8 +101,8 @@ function onConnection(socket) {
 
     socket.on('playCard', function(card) {
         // Attempt to play a card
-        let playColor = cardColor(card);
-        let playType = cardType(card);
+        let playColor = card.Color;
+        let playType = card.Type;
 
         // Only let someone play if it's their turn
         if(socket.id == currentPlayer) {
@@ -361,7 +361,17 @@ function createPlayers() {
 
 function createDeck() {
     // Create a new deck
-    deck = Array.from(Array(112), (_, i) => i);
+    deck = new Array();
+
+    for(var i = 0; i < 112; i++) {
+        var color = cardColor(i);
+        var type = cardType(i);
+        var value = cardValue(i);
+
+        var card = {'ID': i, 'Color': color, 'Type': type, 'Value': value};
+        deck.push(card);
+    }
+
     shuffle(deck);
 }
 
@@ -431,6 +441,7 @@ function drawCard(SocketID, num) {
         }
 
         io.emit('logMessage', player.Name + ' drew ' + num + label);
+        io.to(currentPlayer).emit('hideDraw');
     }
 
     // If the original # of cards to be drawn was 1 that means it was the player's turn and they had nothing to play
@@ -471,7 +482,7 @@ function getPoints(players) {
     // Count value of cards in each player's hand
     players.forEach((player) => {
         player.Hand.forEach((card) => {
-            points += cardValue(card);
+            points += card.Value;
         });
     });
 
@@ -489,14 +500,14 @@ function discardCard(card, SocketID) {
     if(SocketID != -1) {
         // If it's a real player (e.g. not dealing a card to the discard pile) then remove the card from their hand
         player = players.get(SocketID);
-        let cardIndex = player.Hand.indexOf(card);
+        let cardIndex = player.Hand.findIndex(item => item.ID == card.ID);
         player.Hand.splice(cardIndex, 1);
     }
 
     // Add the card to the discard pile and update the game's current color/card type
     discardPile.push(card);
-    currentColor = cardColor(card);
-    currentType = cardType(card);
+    currentColor = card.Color;
+    currentType = card.Type;
     io.emit('discardCard', card, player);
 }
 
@@ -546,8 +557,8 @@ function canPlay(currentPlayer, invalidCards) {
     
     player.Hand.forEach((card) => {
         // Check every card in the hand
-        let playColor = cardColor(card);
-        let playType = cardType(card);
+        let playColor = card.Color;
+        let playType = card.Type;
 
         if(!invalidCards.includes(playType)) {
             // Make sure card isn't in the invalid list
@@ -571,7 +582,9 @@ function startGame() {
     cardsToDraw = 0;
     discardPile = new Array();
     requiredPlay = new Array();
+    io.emit('notCalledUnoMe');
     io.emit('hideColor');
+    io.emit('hideDraw');
 
     // Randomly select a new player to play first
     var currentPlayerID = Math.floor(Math.random() * players.size);
