@@ -211,8 +211,6 @@ function repositionCards(player) {
 
         var i = 0;
         cardArray.forEach(card => {
-            console.log(card.getAttribute('dataCardColor'), card.getAttribute('dataCardType'));
-            
             // As more cards as drawn, overlap them more
             var marginLeft = i === 0 ? '-20' : -5 * (cardCount - 1) + 5;
             if(marginLeft < -59){marginLeft = -59;}
