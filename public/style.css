@@ -3,18 +3,11 @@
     --card-height: 165px;
 }
 
-.game-content {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-}
-
 body {
     font-family: Arial, sans-serif;
     margin: 0;
     padding: 0;
     background-color: #00897B;
-    display: flex;
 }
 
 main {
@@ -23,7 +16,6 @@ main {
     min-height: 350px;
     font-family: sans-serif;
     padding: 20px;
-    flex: 1;
 }
 
 .btn, .game-btn {
@@ -282,60 +274,36 @@ main .player .hand {
 }
 
 #options {
-    display: none;
+    display: flex;
+    flex-direction: column;
     background: white;
     border: 2px solid black;
     border-radius: 10px;
-    flex-direction: column;
-    align-items: flex-start;
     padding: 10px;
+}
+
+#options-container {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+}
+
+#left-options {
+    flex: 1;
+    min-width: 50%;
+    display: flex;
+    flex-direction: column; /* Stack items vertically */
+}
+
+#right-options img {
+    max-width: 80%; /* Make sure the image doesn't exceed the width of its container */
+    height: 200px; /* Maintain aspect ratio */
+    width: 900px;
 }
 
 hr {
     border: 1px solid gray;
     margin: 10px 0;
     width: 100%;
-}
-
-.side-panel {
-    width: 250px;
-    height: 100%;
-    background-color: #f0f0f0;
-    box-shadow: -2px 0 5px rgba(0, 0, 0, 0.2);
-    overflow-y: auto;
-    overflow-x: hidden;
-    font-size: 14px;
-    min-height: 100vh;
-    transition: width 0.3s;
-    display: flex;
-}
-
-.side-panel.collapsed {
-    width: 33px;
-}
-
-.side-panel.collapsed .collapse-button {
-    transform: rotate(180deg);
-}
-
-.side-panel.collapsed .message {
-    display: none;
-}
-
-.collapse-button {
-    background-color: #f0f0f0;
-    border: none;
-    padding: 5px 10px;
-    font-size: 14px;
-    cursor: pointer;
-    transition: transform 0.3s;
-}
-
-.message {
-    padding: 10px;
-    border-bottom: 1px solid #ccc;
-}
-
-#message-container { 
-    border-left: 1px solid #ccc;
 }
