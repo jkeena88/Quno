@@ -9,71 +9,70 @@
     </head>
 
     <body>
-        <div class="game-content">
-            <header>
-                <h1>Quno</h1>
-            </header>
-            <main>
-                <div class="game-options">
-                    <input type="button" id="btnOptions" class="game-btn" value="Options" onclick="showOptions()">
-                    <input type="button" id="btnStart" class="game-btn" value="Start New Match" onclick="resetGame()">
-                    <input type="button" id="btnDeal" class="game-btn" value="Deal New Hand" onclick="newHand()">
-                    <input type="button" id="btnJoin" class="game-btn" value="Join" onclick="joinGame()">
-                </div>
+        <header>
+            <h1>Quno</h1>
+        </header>
+        <main>
+            <div class="game-options">
+                <input type="button" id="btnOptions" class="game-btn" value="Options" onclick="showOptions()">
+                <input type="button" id="btnStart" class="game-btn" value="Start New Match" onclick="resetGame()">
+                <input type="button" id="btnDeal" class="game-btn" value="Deal New Hand" onclick="newHand()">
+                <input type="button" id="btnJoin" class="game-btn" value="Join" onclick="joinGame()">
+            </div>
 
-                <div id="options">
-                    <label><input type="checkbox" id="masterCheckbox" name="mattMode" value="mattMode">Matt Mode (maximum chaos)</label>
-                    <hr>
-                    <label><input type="checkbox" class="controlledCheckbox" name="playWildDraw4" value="playWildDraw4">Play Wild Draw 4 any time</label>
-                    <label><input type="checkbox" class="controlledCheckbox" name="stackDraw2" value="stackDraw2">Stack Draw 2s</label>
-                    <label><input type="checkbox" class="controlledCheckbox" name="skipDraw2" value="skipDraw2">Skip Draw 2s</label>
-                    <label><input type="checkbox" class="controlledCheckbox" name="reverseDraw2" value="reverseDraw2">Reverse Draw 2s</label>
-                    <label><input type="checkbox" class="controlledCheckbox" name="stackDraw4" value="stackDraw4">Stack Draw 4s</label>
-                    <input type="button" id="btnSaveOptions" class="btn" value="Save" onclick="saveOptions()">
-                </div>
-
-                <div class="status" id="playerList"><strong>Players: </strong></div>
-
-                <div class="status" id="status"></div>
-
-                <div id="players" class="players">
-                    <div id="player0" class="grid-item playerOpponent"></div>
-                    <div id="player1" class="grid-item playerOpponent"></div>
-                    <div id="player2" class="grid-item playerOpponent"></div>
-                    <div id="player3" class="grid-item playerOpponent"></div>
-                    <div class="grid-item playArea1">
-                        <div class="pile"></div>
+            <div id="options">
+                <div id="options-container">
+                    <div id="left-options">
+                        <label><input type="checkbox" id="masterCheckbox" name="mattMode" value="mattMode">Matt Mode (maximum chaos)</label>
+                        <hr>
+                        <label><input type="checkbox" class="controlledCheckbox" name="playWildDraw4" value="playWildDraw4">Play Wild Draw 4 any time</label>
+                        <label><input type="checkbox" class="controlledCheckbox" name="stackDraw2" value="stackDraw2">Stack Draw 2s</label>
+                        <label><input type="checkbox" class="controlledCheckbox" name="skipDraw2" value="skipDraw2">Skip Draw 2s</label>
+                        <label><input type="checkbox" class="controlledCheckbox" name="reverseDraw2" value="reverseDraw2">Reverse Draw 2s</label>
+                        <label><input type="checkbox" class="controlledCheckbox" name="stackDraw4" value="stackDraw4">Stack Draw 4s</label>
+                        <input type="button" id="btnSaveOptions" class="btn" value="Save" onclick="saveOptions()">
                     </div>
-                    <div class="grid-item playArea2">
-                        <div id="discard" class="card"></div>
-                        <div id="color-bar" class="color-bar"></div>
+                    <div id="right-options">
+                        <img src="./images/Stacking.jpg" alt="YoU cAn'T sTaCk DrAw 2s" id="options-image">
                     </div>
-                    <div id="player4" class="grid-item playerOpponent"></div>
-                    <div id="player5" class="grid-item playerOpponent"></div>
-                    <div id="player6" class="grid-item playerOpponent"></div>
-                    <div id="playerSelf" class="grid-item playerSelf"></div>
                 </div>
+            </div>
 
-                <div id="color-buttons" class="color-buttons">
-                    <input type="button" id="btnYellow" class="btn" value="Yellow" onclick="setColor('yellow')">
-                    <input type="button" id="btnRed" class="btn" value="Red" onclick="setColor('red')">
-                    <input type="button" id="btnBlue" class="btn" value="Blue" onclick="setColor('blue')">
-                    <input type="button" id="btnGreen" class="btn" value="Green" onclick="setColor('green')">
+            <div class="status" id="playerList"><strong>Players: </strong></div>
+
+            <div class="status" id="status"></div>
+
+            <div id="players" class="players">
+                <div id="player0" class="grid-item playerOpponent"></div>
+                <div id="player1" class="grid-item playerOpponent"></div>
+                <div id="player2" class="grid-item playerOpponent"></div>
+                <div id="player3" class="grid-item playerOpponent"></div>
+                <div class="grid-item playArea1">
+                    <div class="pile"></div>
                 </div>
-
-                <div id="uno-buttons" class="uno-buttons">
-                    <input type="button" id="btnUnoMe" class="btn" value="Call Uno For Me" onclick="unoMe()">
-                    <input type="button" id="btnUnoYou" class="btn" value="Call Uno On Another" onclick="unoYou()">
-                    <input type="button" id="btnDraw" class="game-btn" value="Draw" onclick="drawCard()">
+                <div class="grid-item playArea2">
+                    <div id="discard" class="card"></div>
+                    <div id="color-bar" class="color-bar"></div>
                 </div>
-            </main>
-        </div>
+                <div id="player4" class="grid-item playerOpponent"></div>
+                <div id="player5" class="grid-item playerOpponent"></div>
+                <div id="player6" class="grid-item playerOpponent"></div>
+                <div id="playerSelf" class="grid-item playerSelf"></div>
+            </div>
 
+            <div id="color-buttons" class="color-buttons">
+                <input type="button" id="btnYellow" class="btn" value="Yellow" onclick="setColor('yellow')">
+                <input type="button" id="btnRed" class="btn" value="Red" onclick="setColor('red')">
+                <input type="button" id="btnBlue" class="btn" value="Blue" onclick="setColor('blue')">
+                <input type="button" id="btnGreen" class="btn" value="Green" onclick="setColor('green')">
+            </div>
 
-        <div class="side-panel" id="side-panel">
-            <button id="collapse-btn" class="collapse-button">&#9654;</button>
-            <div id="message-container"></div>
-        </div>
+            <div id="uno-buttons" class="uno-buttons">
+                <input type="button" id="btnUnoMe" class="btn" value="Call Uno For Me" onclick="unoMe()">
+                <input type="button" id="btnUnoYou" class="btn" value="Call Uno On Another" onclick="unoYou()">
+                <input type="button" id="btnDraw" class="game-btn" value="Draw" onclick="drawCard()">
+            </div>
+        </main>
 
         <script type="text/javascript" src="/socket.io/socket.io.js"></script>
         <script type="text/javascript" src="/main.js"></script>
