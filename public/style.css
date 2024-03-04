@@ -290,6 +290,26 @@ main .player .hand {
     align-items: flex-start;
     padding: 10px;
 }
+#options-container {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+}
+
+#left-options {
+    flex: 1;
+    min-width: 50%;
+    display: flex;
+    flex-direction: column; /* Stack items vertically */
+    padding-right: 90px;
+}
+
+#right-options img {
+    max-width: 80%; /* Make sure the image doesn't exceed the width of its container */
+    height: 200px; /* Maintain aspect ratio */
+    width: 900px;
+}
 
 hr {
     border: 1px solid gray;

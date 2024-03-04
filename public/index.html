@@ -22,14 +22,21 @@
                 </div>
 
                 <div id="options">
-                    <label><input type="checkbox" id="masterCheckbox" name="mattMode" value="mattMode">Matt Mode (maximum chaos)</label>
-                    <hr>
-                    <label><input type="checkbox" class="controlledCheckbox" name="playWildDraw4" value="playWildDraw4">Play Wild Draw 4 any time</label>
-                    <label><input type="checkbox" class="controlledCheckbox" name="stackDraw2" value="stackDraw2">Stack Draw 2s</label>
-                    <label><input type="checkbox" class="controlledCheckbox" name="skipDraw2" value="skipDraw2">Skip Draw 2s</label>
-                    <label><input type="checkbox" class="controlledCheckbox" name="reverseDraw2" value="reverseDraw2">Reverse Draw 2s</label>
-                    <label><input type="checkbox" class="controlledCheckbox" name="stackDraw4" value="stackDraw4">Stack Draw 4s</label>
-                    <input type="button" id="btnSaveOptions" class="btn" value="Save" onclick="saveOptions()">
+                    <div id="options-container">
+                        <div id="left-options">
+                            <label><input type="checkbox" id="masterCheckbox" name="mattMode" value="mattMode">Matt Mode (maximum chaos)</label>
+                            <hr>
+                            <label><input type="checkbox" class="controlledCheckbox" name="playWildDraw4" value="playWildDraw4">Play Wild Draw 4 any time</label>
+                            <label><input type="checkbox" class="controlledCheckbox" name="stackDraw2" value="stackDraw2">Stack Draw 2s</label>
+                            <label><input type="checkbox" class="controlledCheckbox" name="skipDraw2" value="skipDraw2">Skip Draw 2s</label>
+                            <label><input type="checkbox" class="controlledCheckbox" name="reverseDraw2" value="reverseDraw2">Reverse Draw 2s</label>
+                            <label><input type="checkbox" class="controlledCheckbox" name="stackDraw4" value="stackDraw4">Stack Draw 4s</label>
+                            <input type="button" id="btnSaveOptions" class="btn" value="Save" onclick="saveOptions()">
+                        </div>
+                        <div id="right-options">
+                            <img src="./images/Stacking.jpg" alt="YoU cAn'T sTaCk DrAw 2s" id="options-image">
+                        </div>
+                    </div>
                 </div>
 
                 <div class="status" id="playerList"><strong>Players: </strong></div>
