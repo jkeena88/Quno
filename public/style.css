@@ -71,8 +71,9 @@ main .card {
     position: relative;
     z-index: 1;
     flex: 0 0 var(--card-width);
-    zoom: 0.6;
-    -moz-transform: scale(0.6);
+    transform-origin: top left;
+    transform: scale(0.6);
+    transition: transform 0.2s;
 }
 
 main .card:first-child {
@@ -209,22 +210,10 @@ main #status {
     float: left;
 }
 
-.discard {
-    background: white;
-    color: #222;
-    padding: 10px;
-    border-radius: 10px;
-    border: 2px;
-    font-size: 12pt;
-    display: none;
-    text-align: center;
-}
-
 #discard {
     width: var(--card-width);
     height: var(--card-height);
-    zoom: 0.9;
-    -moz-transform: scale(0.9);
+    transform: scale(0.9);
 }
 
 #color-bar {
@@ -240,6 +229,7 @@ main .player .hand {
     justify-content: flex-start;
     align-items: flex-start;
     position: relative;
+    height: calc(var(--card-height) * 0.6); /* adjust for scaled cards */
     padding-left: 20px;
 }
 
@@ -290,6 +280,7 @@ main .player .hand {
     align-items: flex-start;
     padding: 10px;
 }
+
 #options-container {
     display: flex;
     justify-content: space-between;
@@ -358,4 +349,15 @@ hr {
 
 #message-container { 
     border-left: 1px solid #ccc;
+}
+
+main .card.unplayable {
+    filter: brightness(0.7) saturate(0.8);
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
+main .card.unplayable:hover {
+    filter: brightness(0.9) saturate(1);
+    transform: none !important;
 }

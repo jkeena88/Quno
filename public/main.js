@@ -10,6 +10,7 @@ var players = 0;
 var playerName;
 
 let isPlayerA = false;
+let currentColor = null;
 
 const sidePanel = document.getElementById('side-panel');
 const collapseButton = document.getElementById('collapse-btn');
@@ -64,6 +65,7 @@ socket.on('chooseColor', function() {
 });
 
 socket.on('colorChosen', function(color) {
+    currentColor = color;
     // Display which color was selected after a wild
     document.getElementById('color-bar').style.background=color;
 });
@@ -90,6 +92,18 @@ socket.on('turnChange', function(PlayerID) {
         document.getElementById('btnUnoMe').style.background="#222";
         var audio = new Audio('audio/turn-change.wav');
         audio.play();
+
+        const topCard = {
+            Color: document.getElementById('discard').getAttribute('dataCardColor'),
+            Type: document.getElementById('discard').getAttribute('dataCardType')
+        };
+        
+        updatePlayableCards(topCard, currentColor);
+    } else {
+        const hand = document.getElementById('hand_' + playerId);
+        if (hand) {
+            hand.querySelectorAll('.card').forEach(c => c.classList.add('unplayable'));
+        }
     }
 });
 
@@ -135,6 +149,17 @@ socket.on('renderCard', function(card, player) {
     hand.appendChild(cardObj);
 
     repositionCards(player);
+
+    if(player.SocketID == socketId) {
+        const topCard = {
+            Color: document.getElementById('discard').getAttribute('dataCardColor'),
+            Type: document.getElementById('discard').getAttribute('dataCardType')
+        };
+
+        const activeColor = currentColor || topCard.Color;
+
+        updatePlayableCards(topCard, activeColor);
+    }
 });
 
 socket.on('logMessage', function(message) {
@@ -169,11 +194,11 @@ function getCardUI(card, player) {
 
             // Bump cards up on the screen when they're hovered over
             cardObj.addEventListener('mouseenter', function () {
-            cardObj.style.transform = 'translateY(-50px)';
+                cardObj.style.transform = 'scale(0.6) translateY(-50px)';
             });
 
             cardObj.addEventListener('mouseleave', function () {
-            cardObj.style.transform = 'translateY(0)';
+                cardObj.style.transform = 'scale(0.6) translateY(0)';
             });
         }
     } else {
@@ -187,30 +212,23 @@ function getCardUI(card, player) {
 
 function repositionCards(player) {
     // Adjust card positioning as new cards get added to a hand
-    var hand = document.getElementById('hand_' + player.PlayerID);
-    var cards = hand.children;
-    var cardCount = cards.length;
+    const hand = document.getElementById('hand_' + player.PlayerID);
+    if (!hand) return;
+
+    const cards = Array.from(hand.children);
+    const cardCount = cards.length;
 
     if(player.SocketID == socketId) {
-        const cardArray = Array.from(cards);
-        cardArray.sort((a, b) => {
-            const aColor = a.getAttribute('dataCardColor');
-            const bColor = b.getAttribute('dataCardColor');
-            const colorComparison = aColor.localeCompare(bColor);
-
-            if(colorComparison == 0) {
-                const aType = a.getAttribute('dataCardType');
-                const bType = b.getAttribute('dataCardType');
-                return aType.localeCompare(bType);
-            }
-
-            return colorComparison;
+        cards.sort((a, b) => {
+            const colorDiff = a.getAttribute('dataCardColor').localeCompare(b.getAttribute('dataCardColor'));
+            if (colorDiff !== 0) return colorDiff;
+            return a.getAttribute('dataCardType').localeCompare(b.getAttribute('dataCardType'));
         });
 
         hand.innerHTML = '';
 
         var i = 0;
-        cardArray.forEach(card => {
+        cards.forEach(card => {
             // As more cards as drawn, overlap them more
             var marginLeft = i === 0 ? '-20' : -5 * (cardCount - 1) + 5;
             if(marginLeft < -59){marginLeft = -59;}
@@ -219,7 +237,34 @@ function repositionCards(player) {
 
             hand.appendChild(card);
         });
+    } else {
+        // For opponent hands, just append in order
+        hand.innerHTML = '';
+        cards.forEach((card, i) => hand.appendChild(card));
     }
+}
+
+function updatePlayableCards(topCard, currentColor) {
+    const hand = document.getElementById('hand_' + playerId);
+    if (!hand) return;
+
+    const cards = hand.querySelectorAll('.card');
+    cards.forEach(card => {
+        const cardColor = card.getAttribute('dataCardColor');
+        const cardType = card.getAttribute('dataCardType');
+
+        let playable = false;
+
+        if (cardColor === currentColor) playable = true;
+        if (cardType === topCard.Type) playable = true;
+        if (cardColor === 'black') playable = true;
+
+        if (playable) {
+            card.classList.remove('unplayable');
+        } else {
+            card.classList.add('unplayable');
+        }
+    });
 }
 
 function playCard(card, player) {
@@ -230,6 +275,8 @@ function playCard(card, player) {
 }
 
 socket.on('discardCard', function(card, player) {
+    currentColor = card.Color;
+
     // Add a card to the discard pile
     var cardObj = getCardUI(card);
     cardObj.id = 'discard';
