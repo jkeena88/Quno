@@ -55,7 +55,7 @@ socket.on('gameStarted', function(players) {
 
 socket.on('newPlayer', function(playersInLobby) {
     // Update the list and count of players
-    document.getElementById('playerList').innerHTML = "<strong>Players:</strong> " + playersInLobby.join(', ');
+    document.getElementById('playerList').innerHTML = "<strong>Players:</strong>&nbsp;" + playersInLobby.join(', ');
     players = playersInLobby.length;
 });
 
