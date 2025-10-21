@@ -9,7 +9,7 @@ io.on('connection', onConnection);
 server.listen(port, () => console.log('listening on port ' + port));
 
 const maxPlayers = 8;
-var playDirection = 1;
+var playDirection = -1;
 var currentPlayer;
 var currentColor;
 var currentType;
@@ -578,7 +578,7 @@ function startGame() {
 
     // Reset some game variables
     gameIsOver = false;
-    playDirection = 1;
+    playDirection = -1;
     cardsToDraw = 0;
     discardPile = new Array();
     requiredPlay = new Array();
