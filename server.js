@@ -219,24 +219,57 @@ function onConnection(socket) {
     socket.on('unoMe', function() {
         // Player called Uno
         let player = players.get(socket.id);
+        if (!player) return;
+
+        if (player.HasCalledUnoMeThisTurn) return;
+
+        player.HasCalledUnoMeThisTurn = true;
+        io.to(socket.id).emit('calledUnoMe');
+
+        const now = Date.now();
+        const GRACE_MS = 1000;
+
+        player.LastUnoMeTime = Date.now();
 
         // Only let them call it if it's their turn and they have 2 cards, or if it's not their turn and they have 1 card
         if((player.Hand.length <= 2 && socket.id == currentPlayer) || player.Hand.length == 1) {
-            player.HasCalledUno = true;
-            io.to(socket.id).emit('calledUnoMe');
-            io.emit('logMessage', socket.playerName + ' called Uno');
+            if (!player.HasCalledUno) {
+                io.emit('logMessage', socket.playerName + ' called Uno');
+                player.HasCalledUno = true;
+            }
+        } else {
+            const recentlyGotUnoYou = player.LastUnoYouTime && (now - player.LastUnoYouTime < GRACE_MS);
+
+            if (!recentlyGotUnoYou) {
+                io.emit('logMessage', socket.playerName + ' called Uno at the wrong time - oops!');
+                drawCard(socket.id, 2);
+            }
         }
     });
 
     socket.on('unoYou', function() {
         // Player called Uno on someone else
 
-        // Iterate through all players and see if they have 1 card + haven't called Uno
+        let caller = players.get(socket.id);
+        if (!caller) return;
+
+        if (caller.HasCalledUnoYou) return;
+
+        caller.HasCalledUnoYou = true;
+        io.to(socket.id).emit('calledUnoYou');
+
+        const now = Date.now();
+        const GRACE_MS = 1000;
+
         players.forEach((player) => {
-            if(player.Hand.length == 1 && player.HasCalledUno == false) {
+            const recentlyCalledUnoMe = player.LastUnoMeTime && (now - player.LastUnoMeTime < GRACE_MS);
+
+            // Iterate through all players and see if they have 1 card + haven't called Uno
+            if(player.Hand.length == 1 && !player.HasCalledUno && !recentlyCalledUnoMe) {
                 // Draw cards if they're caught
                 io.emit('logMessage', player.Name + ' had Uno called on them');
                 drawCard(player.SocketID, 4);
+                player.LastUnoYouTime = Date.now();
             };
         });
     });
@@ -353,7 +386,18 @@ function createPlayers() {
 
     io.sockets.sockets.forEach((socket) => {
         var hand = new Array();
-        var player = {Name: socket.playerName, PlayerID: i, Points: 0, Hand: hand, SocketID: socket.id, HasCalledUno: false};
+        var player = {
+            Name: socket.playerName, 
+            PlayerID: i, 
+            Points: 0, 
+            Hand: hand, 
+            SocketID: socket.id, 
+            HasCalledUno: false, 
+            HasCalledUnoMeThisTurn: false,
+            HasCalledUnoYou: false, 
+            LastUnoMeTime: 0,
+            LastUnoYouTime: 0
+        };
         players.set(socket.id, player);
         i++;
     });
@@ -532,6 +576,14 @@ function nextTurn() {
             }
         });
 
+        players.forEach((p) => { 
+            p.HasCalledUnoYou = false; 
+            p.HasCalledUnoMeThisTurn = false;
+        });
+
+        io.emit('notCalledUnoMe');
+        io.emit('notCalledUnoYou');
+
         // Draw a card if the next player can't play anything
         let hasCard = canPlay(currentPlayer, ['none']);
         if(!hasCard) {
@@ -539,11 +591,6 @@ function nextTurn() {
         }
 
         player = players.get(currentPlayer);
-
-        // If the next player has 2 or fewer cards, let them call Uno
-        if(player.Hand.length <= 2) {
-            io.to(currentPlayer).emit('notCalledUnoMe');
-        }
 
         requiredPlay = new Array();
         io.emit('turnChange', currentPlayerID);
@@ -593,10 +640,18 @@ function startGame() {
     // Reset each player's hand
     players.forEach((player) => {
         player.Hand = [];
+        player.HasCalledUno = false;
+        player.HasCalledUnoMeThisTurn = false;
+        player.HasCalledUnoYou = false;
+        player.LastUnoMeTime = 0;
+        player.LastUnoYouTime = 0;
         if(player.PlayerID == currentPlayerID) {
             currentPlayer = player.SocketID;
         }
     });
+
+    io.emit('notCalledUnoMe');
+    io.emit('notCalledUnoYou');
 
     // Tell everyone a new game is started, make a new deck, and deal new hands
     io.emit('gameStarted', Array.from(players.values()));

@@ -89,7 +89,6 @@ socket.on('turnChange', function(PlayerID) {
     document.getElementById('player_' + PlayerID).classList.add('active');
 
     if(PlayerID == playerId) {
-        document.getElementById('btnUnoMe').style.background="#222";
         var audio = new Audio('audio/turn-change.wav');
         audio.play();
 
@@ -114,12 +113,38 @@ socket.on('canDrawCard', function() {
 
 socket.on('calledUnoMe', function() {
     // If the player has already called Uno, gray the Uno button out
-    document.getElementById('btnUnoMe').style.background="gray";
+    const btn = document.getElementById('btnUnoMe');
+    if (btn) {
+        btn.disabled = true;
+        btn.style.background = 'gray';
+    }
 });
 
 socket.on('notCalledUnoMe', function() {
     // If the player hasn't already called Uno, make the button not grayed out
-    document.getElementById('btnUnoMe').style.background="#222";
+    const btn = document.getElementById('btnUnoMe');
+    if (btn) {
+        btn.disabled = false;
+        btn.style.background = '#222';
+    }
+});
+
+socket.on('calledUnoYou', function() {
+    // If the player has already called Uno, gray the Uno button out
+    const btn = document.getElementById('btnUnoYou');
+    if (btn) {
+        btn.disabled = true;
+        btn.style.background = 'gray';
+    }
+});
+
+socket.on('notCalledUnoYou', function() {
+    // If the player hasn't already called Uno, make the button not grayed out
+    const btn = document.getElementById('btnUnoYou');
+    if (btn) {
+        btn.disabled = false;
+        btn.style.background = '#222';
+    }
 });
 
 socket.on('updateScore', function(player, points) {
@@ -145,12 +170,15 @@ socket.on('renderCard', function(card, player) {
     // Display a card
     var hand = document.getElementById('hand_' + player.PlayerID);
     var cardObj = getCardUI(card, player);
+    cardObj.classList.add('unplayable');
 
     hand.appendChild(cardObj);
 
     repositionCards(player);
 
-    if(player.SocketID == socketId) {
+    var myTurn = document.getElementById('player_' + playerId).classList.contains('active');
+
+    if(player.SocketID == socketId && myTurn) {
         const topCard = {
             Color: document.getElementById('discard').getAttribute('dataCardColor'),
             Type: document.getElementById('discard').getAttribute('dataCardType')
@@ -410,11 +438,23 @@ function createPlayersUI(players) {
 }
 
 function unoMe() {
+    const btn = document.getElementById('btnUnoMe');
+    if (btn) {
+        btn.disabled = true;
+        btn.style.background = 'gray';
+    }
+
     // Send a message that the player called uno
     socket.emit('unoMe');
 }
 
 function unoYou() {
+    const btn = document.getElementById('btnUnoYou');
+    if (btn) {
+        btn.disabled = true;
+        btn.style.background = 'gray';
+    }
+    
     // Send a message that the player called uno on someone else
     socket.emit('unoYou');
 }
