@@ -32,6 +32,10 @@ socket.on('isPlayerA', function() {
     document.getElementById('btnOptions').style.display="inline-block";
 });
 
+socket.on('updateOptions', function(options) {
+    window.playWildDraw4Enabled = options.playWildDraw4;
+});
+
 socket.on('gameStarted', function(players) {
     var audio = new Audio('audio/game-start.wav');
     audio.play();
@@ -277,6 +281,22 @@ function updatePlayableCards(topCard, currentColor) {
     if (!hand) return;
 
     const cards = hand.querySelectorAll('.card');
+    const playWildDraw4Enabled = window.playWildDraw4Enabled || false;
+
+    let hasOtherPlayable = false;
+
+    // First pass: check if there are any other playable cards besides Wild Draw 4
+    cards.forEach(card => {
+        const cardColor = card.getAttribute('dataCardColor');
+        const cardType = card.getAttribute('dataCardType');
+
+        if (cardType !== 'draw4') {
+            if (cardColor === currentColor || cardType === topCard.Type || cardColor === 'black') {
+                hasOtherPlayable = true;
+            }
+        }
+    });
+
     cards.forEach(card => {
         const cardColor = card.getAttribute('dataCardColor');
         const cardType = card.getAttribute('dataCardType');
@@ -285,7 +305,18 @@ function updatePlayableCards(topCard, currentColor) {
 
         if (cardColor === currentColor) playable = true;
         if (cardType === topCard.Type) playable = true;
-        if (cardColor === 'black') playable = true;
+
+        if (cardColor === 'black') {
+            if (cardType === 'wild') {
+                playable = true;
+            } else if (cardType === 'draw4') {
+                if (playWildDraw4Enabled) {
+                    playable = true;
+                } else {
+                    playable = !hasOtherPlayable;
+                }
+            }
+        }
 
         if (playable) {
             card.classList.remove('unplayable');

@@ -307,6 +307,10 @@ function onConnection(socket) {
         } else {
             stackDraw4 = false;
         }
+
+        io.emit('updateOptions', {
+            playWildDraw4
+        });
     });
 }
 
