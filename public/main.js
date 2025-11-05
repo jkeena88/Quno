@@ -198,7 +198,25 @@ socket.on('logMessage', function(message) {
     const messageContainer = document.getElementById('message-container');
     const messageElement = document.createElement('div');
     messageElement.classList.add('message');
-    messageElement.textContent = message;
+
+    const colors = {
+        red: '#FF5555',
+        yellow: '#FFAA01',
+        green: '#55AA55',
+        blue: '#5455FF',
+        black: 'black'
+    };
+    let formattedMessage = message;
+
+    for (const [color, hex] of Object.entries(colors)) {
+        const regex = new RegExp(`\\b${color}\\b`, 'gi');
+        formattedMessage = formattedMessage.replace(
+            regex,
+            `<span style="color: ${hex}; font-weight: bold;">${color}</span>`
+        );
+    }
+
+    messageElement.innerHTML = formattedMessage;
     messageContainer.insertBefore(messageElement, messageContainer.firstChild);
 });
 
