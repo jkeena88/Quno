@@ -137,7 +137,7 @@ function onConnection(socket) {
                     // Wild draw 4 - queue up 4 more cards to be drawn, then have the player choose a new color
                     cardsToDraw += 4;
                     io.to(socket.id).emit('chooseColor');
-                } else if(playType == 'skip') {
+                } else if(playType == 'skip' || (playType == 'reverse' && players.size == 2)) {
                     // Skip - jump over the next player
                     nextTurn();
 
