@@ -112,7 +112,7 @@ socket.on('turnChange', function(PlayerID) {
 
 socket.on('canDrawCard', function() {
     // If the player needs to draw a card, display the draw button
-    document.getElementById('btnDraw').style.display="inline-block";
+    drawCard();
 });
 
 socket.on('calledUnoMe', function() {
