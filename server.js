@@ -18,6 +18,7 @@ var cardsToDraw = 0;
 var discardPile = new Array();
 let players = new Map();
 let playersInLobby = new Array();
+let hostName = null;
 let deck = new Array();
 let playerA = null;
 let playWildDraw4 = false;
@@ -37,19 +38,49 @@ let requiredPlay = new Array();
  */
 function onConnection(socket) {
 
-    // If there's no primary player, make the new player primary
-    if(playerA == null) {
-        playerA = socket.id;
-        io.to(socket.id).emit('isPlayerA');
-    }
+    socket.on('bootPlayer', (targetName) => {
+        // Boot a player from the game
+        if(socket.id == playerA) {
+            const targetSocket = Array.from(io.sockets.sockets.values()).find(s => s.playerName === targetName);
+            if(targetSocket) {
+                targetSocket.emit('booted');
+                targetSocket.disconnect(true); // forcibly disconnect the player
+                playersInLobby = playersInLobby.filter(p => p !== targetName);
+                
+                for (let [id, player] of players.entries()) {
+                    if (player.Name === targetName) {
+                        players.delete(id);
+                        break;
+                    }
+                }
+                
+                io.emit('setHost', hostName);
+                io.emit('newPlayer', playersInLobby);
+                io.emit('logMessage', targetName + ' was booted by the host');
+
+                if (targetName === hostName) {
+                    playerA = null;
+                    hostName = null;
+                }
+
+                if (targetSocket.id == currentPlayer) {
+                    nextTurn();
+                }
+            }
+        }
+    });
 
     // Remove a player if they leave
     socket.on('disconnect', () => {
-        if(socket.id == playerA) {
-            playerA = null;
-        }
         playersInLobby = playersInLobby.filter(player => player !== socket.playerName);
         io.emit('newPlayer', playersInLobby);
+
+        if(socket.id == playerA && socket.playerName === hostName) {
+            const stillHere = Array.from(io.sockets.sockets.values()).some(s => s.playerName === hostName);
+            if(!stillHere) {
+                playerA = null;
+            }
+        }
     });
 
     /**
@@ -61,6 +92,15 @@ function onConnection(socket) {
      */
     socket.on('requestJoin', function(playerName) {
         socket.playerName = playerName;
+
+        // If there's no primary player, make the new player primary
+        if(playerA == null) {
+            playerA = socket.id;
+            hostName = playerName;
+            io.to(socket.id).emit('isPlayerA');
+            io.emit('setHost', hostName);
+        }
+
         let people;
         try {
             people = io.engine.clientsCount;
@@ -73,7 +113,7 @@ function onConnection(socket) {
             socket.join();
             playersInLobby.push(playerName);
             io.to(socket.id).emit('responseRoom', [people + 1, maxPlayers]);
-            io.emit('newPlayer', playersInLobby);
+            io.emit('newPlayer', {players: playersInLobby, host: hostName});
             io.emit('logMessage', playerName + ' joined the game');
 
             return;

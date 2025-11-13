@@ -372,3 +372,37 @@ main .card.unplayable:hover {
     filter: brightness(0.9) saturate(1);
     transform: none !important;
 }
+
+.modal {
+    display: none; 
+    position: fixed; 
+    z-index: 1000; 
+    left: 0;
+    top: 0;
+    width: 100%; 
+    height: 100%; 
+    overflow: auto; 
+    background-color: rgba(0, 0, 0, 0.5); 
+}
+
+.modal-content {
+    background-color: white;
+    margin: 15% auto; 
+    padding: 20px;
+    border-radius: 10px;
+    width: 300px; 
+    text-align: center;
+}
+
+.modal-buttons {
+    margin: 10px;
+    padding: 10px 20px
+}
+
+.crown {
+    display: inline-block;
+    vertical-align: text-top;
+    font-size: 0.9em;
+    margin-right: 3px;
+    margin-top: -4px;
+}

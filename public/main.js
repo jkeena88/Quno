@@ -10,7 +10,9 @@ var players = 0;
 var playerName;
 
 let isPlayerA = false;
+let playerAName = null;
 let currentColor = null;
+let bootTargetId = null;
 
 const sidePanel = document.getElementById('side-panel');
 const collapseButton = document.getElementById('collapse-btn');
@@ -23,6 +25,10 @@ socket.on('connect', function() {
     // Try to join the game
     socketId = socket.id;
     socket.emit('requestJoin', playerName);
+});
+
+socket.on('setHost', function(name) {
+    playerAName = name;
 });
 
 socket.on('isPlayerA', function() {
@@ -57,9 +63,36 @@ socket.on('gameStarted', function(players) {
     createPlayersUI(players);
 });
 
-socket.on('newPlayer', function(playersInLobby) {
+socket.on('newPlayer', function(data) {
     // Update the list and count of players
-    document.getElementById('playerList').innerHTML = "<strong>Players:</strong>&nbsp;" + playersInLobby.join(', ');
+    const {players: playersInLobby, host: hostName} = data;
+    const playerListDiv = document.getElementById('playerList');
+    playerListDiv.innerHTML = "<strong>Players:</strong>&nbsp;";
+    
+    playersInLobby.forEach(name => {
+        const span = document.createElement('span');
+        span.style.marginRight = '10px';
+
+        const isHost = (name === hostName);
+        const displayName = isHost ? `<span class="crown">👑</span>${name}` : name;
+        span.innerHTML = displayName;
+
+        if(isPlayerA) {
+            if (name === playerName) {
+                span.title = 'You (Host)';
+                span.style.cursor = 'default';
+            } else {
+                span.style.cursor = 'pointer';
+                span.title = 'Click to boot player';
+                span.addEventListener('click', () => showBootModal(name));
+            }
+        } else {
+            span.title = isHost ? 'Host' : '';
+        }
+
+        playerListDiv.appendChild(span);
+    });
+
     players = playersInLobby.length;
 });
 
@@ -432,6 +465,11 @@ function createPlayersUI(players) {
         var div_hand = document.createElement('div');
         var div_points = document.createElement('div');
 
+        if(isPlayerA) {
+            div_player_name.style.cursor = 'pointer';
+            div_player_name.addEventListener('click', () => showBootModal(players[i].SocketID, players[i].Name));
+        }
+
         div_player_name.className = 'name';
         div_points.className = 'points';
         div_points.id = 'points_' + players[i].PlayerID;
@@ -547,6 +585,38 @@ function init() {
     // Connect to the server
     socket.connect();
 }
+
+function showBootModal(playerName) {
+    const modal = document.getElementById('bootModal');
+    const msg = document.getElementById('bootMessage');
+    const confirmBtn = document.getElementById('confirmBoot');
+    const cancelBtn = document.getElementById('cancelBoot');
+
+    msg.textContent = `Are you sure you want to boot ${playerName}?`;
+    modal.style.display = 'flex';
+
+    confirmBtn.onclick = () => {
+        socket.emit('bootPlayer', playerName);
+        modal.style.display = 'none';
+    };
+
+    cancelBtn.onclick = () => {
+        modal.style.display = 'none';
+    };
+}
+
+socket.on('booted', () => {
+    socket.io.opts.reconnection = false; // stop Socket.IO from auto-reconnecting
+    socket.disconnect(); // force disconnection from server
+
+    // Optional: replace page content so they can’t keep playing
+    document.body.innerHTML = `
+        <div style="text-align:center; margin-top:100px;">
+            <h1>You have been booted from the game.</h1>
+            <p>Refresh to return to the lobby.</p>
+        </div>
+    `;
+});
 
 
 init();
