@@ -427,6 +427,11 @@ socket.on('discardCard', function(card, player) {
     discard.parentNode.replaceChild(cardObj, discard);
 });
 
+socket.on('cardDrawn', function() {
+    const audio = new Audio('audio/draw-card.wav');
+    audio.play();
+});
+
 function setCookie(name, value, seconds) {
     // Save a cookie with the player name
     let date = new Date();

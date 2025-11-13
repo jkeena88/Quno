@@ -510,6 +510,8 @@ function performDraw(player) {
     const card = deck.pop();
     player.Hand.push(card);
     io.emit('renderCard', card, player);
+
+    io.emit('cardDrawn');
 }
 
 function drawCards(SocketID, num) {
