@@ -43,6 +43,9 @@ socket.on('updateOptions', function(options) {
 });
 
 socket.on('gameStarted', function(players) {
+
+    document.getElementById('waitingOverlay').style.display="none";
+
     var audio = new Audio('audio/game-start.wav');
     audio.play();
 
@@ -62,6 +65,15 @@ socket.on('gameStarted', function(players) {
     // Display players
     createPlayersUI(players);
 });
+
+function updateWaitingOverlay() {
+    const overlay = document.getElementById('waitingOverlay');
+    if (!isPlayerA) {
+        overlay.style.display = 'flex';
+    } else {
+        overlay.style.display = 'none';
+    }
+}
 
 socket.on('newPlayer', function(data) {
     // Update the list and count of players
@@ -94,6 +106,19 @@ socket.on('newPlayer', function(data) {
     });
 
     players = playersInLobby.length;
+
+    const startBtn = document.getElementById('btnStart');
+    if (isPlayerA) {
+        if (players > 1) {
+            startBtn.disabled = false;
+            startBtn.innerText = 'Start New Match';
+        } else {
+            startBtn.disabled = true;
+            startBtn.innerText = 'Waiting for Players';
+        }
+    } else {
+        updateWaitingOverlay();
+    }
 });
 
 socket.on('chooseColor', function() {
