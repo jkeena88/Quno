@@ -148,6 +148,9 @@ socket.on('hideDraw', function() {
 });
 
 socket.on('requiredPlay', list => {
+    const myTurn = document.getElementById('player_' + playerId).classList.contains('active');
+    if (!myTurn) return;
+
     requiredPlay = list;
 
     const topCard = {
@@ -375,7 +378,6 @@ function updatePlayableCards(topCard, currentColor) {
 
     const cards = hand.querySelectorAll('.card');
     const playWildDraw4Enabled = window.playWildDraw4Enabled || false;
-
     const mustPlaySpecific = requiredPlay.length > 0;
 
     let hasOtherPlayable = false;
@@ -399,7 +401,7 @@ function updatePlayableCards(topCard, currentColor) {
         let playable = false;
 
         if (mustPlaySpecific) {
-            playable = requiredPlay.includes(cardType);
+            playable = requiredPlay.includes(cardType) && (cardColor === currentColor || cardColor === 'black' || cardType === topCard.Type);
         } else {
             if (cardColor === currentColor) playable = true;
             if (cardType === topCard.Type) playable = true;
