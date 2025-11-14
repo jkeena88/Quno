@@ -23,7 +23,7 @@ jobs:
 
       - name: npm install, build, and test
         run: |
-          npm install
+          npm install --production
           npm run build --if-present
           npm run test --if-present
       
@@ -31,9 +31,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: node-app
-          path: |
-            .
-            !**/node_modules/.cache/**
+          path: .
 
   deploy:
     runs-on: ubuntu-latest
@@ -56,5 +54,6 @@ jobs:
           slot-name: 'Production'
           publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_CC80449BF0D64C49B369DB6F4AFCC3E4 }}
           package: .
+
 
 
