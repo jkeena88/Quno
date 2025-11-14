@@ -31,6 +31,8 @@
                             <label><input type="checkbox" class="controlledCheckbox" name="skipDraw2" value="skipDraw2">Skip Draw 2s</label>
                             <label><input type="checkbox" class="controlledCheckbox" name="reverseDraw2" value="reverseDraw2">Reverse Draw 2s</label>
                             <label><input type="checkbox" class="controlledCheckbox" name="stackDraw4" value="stackDraw4">Stack Draw 4s</label>
+                            <label><input type="checkbox" class="controlledCheckbox" name="skipDraw4" value="skipDraw4">Skip Draw 4s</label>
+                            <label><input type="checkbox" class="controlledCheckbox" name="reverseDraw4" value="reverseDraw4">Reverse Draw 4s</label>
                             <input type="button" id="btnSaveOptions" class="btn" value="Save" onclick="saveOptions()">
                         </div>
                         <div id="right-options">
@@ -73,6 +75,8 @@
                     <input type="button" id="btnUnoYou" class="btn" value="Call Uno On Another" onclick="unoYou()">
                     <input type="button" id="btnDraw" class="game-btn" value="Draw" onclick="drawCard()">
                 </div>
+                
+                <div id="waitingOverlay">Waiting for the host to start the game</div>
             </main>
         </div>
 
@@ -80,6 +84,16 @@
         <div class="side-panel" id="side-panel">
             <button id="collapse-btn" class="collapse-button">&#9654;</button>
             <div id="message-container"></div>
+        </div>
+
+        <div id="bootModal" class="modal">
+            <div class="modal-content">
+                <p id="bootMessage">Are you sure you want to boot this player?</p>
+                <div class="modal-buttons">
+                    <button id="confirmBoot" class="btn">Yes</button>
+                    <button id="cancelBoot" class="btn">Cancel</button>
+                </div>
+            </div>
         </div>
 
         <script type="text/javascript" src="/socket.io/socket.io.js"></script>

@@ -10,6 +10,10 @@ var players = 0;
 var playerName;
 
 let isPlayerA = false;
+let playerAName = null;
+let currentColor = null;
+let bootTargetId = null;
+let requiredPlay = [];
 
 const sidePanel = document.getElementById('side-panel');
 const collapseButton = document.getElementById('collapse-btn');
@@ -24,6 +28,10 @@ socket.on('connect', function() {
     socket.emit('requestJoin', playerName);
 });
 
+socket.on('setHost', function(name) {
+    playerAName = name;
+});
+
 socket.on('isPlayerA', function() {
     // Show game controls to the first player to join
     isPlayerA = true;
@@ -31,7 +39,14 @@ socket.on('isPlayerA', function() {
     document.getElementById('btnOptions').style.display="inline-block";
 });
 
+socket.on('updateOptions', function(options) {
+    window.playWildDraw4Enabled = options.playWildDraw4;
+});
+
 socket.on('gameStarted', function(players) {
+
+    document.getElementById('waitingOverlay').style.display="none";
+
     var audio = new Audio('audio/game-start.wav');
     audio.play();
 
@@ -52,18 +67,73 @@ socket.on('gameStarted', function(players) {
     createPlayersUI(players);
 });
 
-socket.on('newPlayer', function(playersInLobby) {
+function updateWaitingOverlay() {
+    const overlay = document.getElementById('waitingOverlay');
+    if (!isPlayerA) {
+        overlay.style.display = 'flex';
+    } else {
+        overlay.style.display = 'none';
+    }
+}
+
+socket.on('newPlayer', function(data) {
     // Update the list and count of players
-    document.getElementById('playerList').innerHTML = "<strong>Players:</strong> " + playersInLobby.join(', ');
+    const {players: playersInLobby, host: hostName} = data;
+    const playerListDiv = document.getElementById('playerList');
+    playerListDiv.innerHTML = "<strong>Players:</strong>&nbsp;";
+    
+    playersInLobby.forEach(name => {
+        const span = document.createElement('span');
+        span.style.marginRight = '10px';
+
+        const isHost = (name === hostName);
+        const displayName = isHost ? `<span class="crown">👑</span>${name}` : name;
+        span.innerHTML = displayName;
+
+        if(isPlayerA) {
+            if (name === playerName) {
+                span.title = 'You (Host)';
+                span.style.cursor = 'default';
+            } else {
+                span.style.cursor = 'pointer';
+                span.title = 'Click to boot player';
+                span.addEventListener('click', () => showBootModal(name));
+            }
+        } else {
+            span.title = isHost ? 'Host' : '';
+        }
+
+        playerListDiv.appendChild(span);
+    });
+
     players = playersInLobby.length;
+
+    const startBtn = document.getElementById('btnStart');
+    if (isPlayerA) {
+        if (players > 1) {
+            startBtn.disabled = false;
+            startBtn.innerText = 'Start New Match';
+        } else {
+            startBtn.disabled = true;
+            startBtn.innerText = 'Waiting for Players';
+        }
+    } else {
+        updateWaitingOverlay();
+    }
 });
 
 socket.on('chooseColor', function() {
     // Display the buttons to let the player pick a color after wild
     document.getElementById('color-buttons').style.display="flex";
+
+    const hand = document.getElementById('hand_' + playerId);
+    if (hand) {
+        hand.querySelectorAll('.card').forEach(c => c.classList.add('unplayable'));
+    }
 });
 
 socket.on('colorChosen', function(color) {
+    currentColor = color;
     // Display which color was selected after a wild
     document.getElementById('color-bar').style.background=color;
 });
@@ -77,6 +147,17 @@ socket.on('hideDraw', function() {
     document.getElementById('btnDraw').style.display="none";
 });
 
+socket.on('requiredPlay', list => {
+    requiredPlay = list;
+
+    const topCard = {
+        Color: document.getElementById('discard').getAttribute('dataCardColor'),
+        Type: document.getElementById('discard').getAttribute('dataCardType')
+    };
+    
+    updatePlayableCards(topCard, currentColor);
+});
+
 socket.on('turnChange', function(PlayerID) {
     // Mark all players as inactive
     for(let i = 0; i < players; i++) {
@@ -87,25 +168,62 @@ socket.on('turnChange', function(PlayerID) {
     document.getElementById('player_' + PlayerID).classList.add('active');
 
     if(PlayerID == playerId) {
-        document.getElementById('btnUnoMe').style.background="#222";
         var audio = new Audio('audio/turn-change.wav');
         audio.play();
+
+        const topCard = {
+            Color: document.getElementById('discard').getAttribute('dataCardColor'),
+            Type: document.getElementById('discard').getAttribute('dataCardType')
+        };
+        
+        updatePlayableCards(topCard, currentColor);
+    } else {
+        const hand = document.getElementById('hand_' + playerId);
+        if (hand) {
+            hand.querySelectorAll('.card').forEach(c => c.classList.add('unplayable'));
+        }
     }
 });
 
 socket.on('canDrawCard', function() {
     // If the player needs to draw a card, display the draw button
-    document.getElementById('btnDraw').style.display="inline-block";
+    drawCard();
 });
 
 socket.on('calledUnoMe', function() {
     // If the player has already called Uno, gray the Uno button out
-    document.getElementById('btnUnoMe').style.background="gray";
+    const btn = document.getElementById('btnUnoMe');
+    if (btn) {
+        btn.disabled = true;
+        btn.style.background = 'gray';
+    }
 });
 
 socket.on('notCalledUnoMe', function() {
     // If the player hasn't already called Uno, make the button not grayed out
-    document.getElementById('btnUnoMe').style.background="#222";
+    const btn = document.getElementById('btnUnoMe');
+    if (btn) {
+        btn.disabled = false;
+        btn.style.background = '#222';
+    }
+});
+
+socket.on('calledUnoYou', function() {
+    // If the player has already called Uno, gray the Uno button out
+    const btn = document.getElementById('btnUnoYou');
+    if (btn) {
+        btn.disabled = true;
+        btn.style.background = 'gray';
+    }
+});
+
+socket.on('notCalledUnoYou', function() {
+    // If the player hasn't already called Uno, make the button not grayed out
+    const btn = document.getElementById('btnUnoYou');
+    if (btn) {
+        btn.disabled = false;
+        btn.style.background = '#222';
+    }
 });
 
 socket.on('updateScore', function(player, points) {
@@ -131,17 +249,49 @@ socket.on('renderCard', function(card, player) {
     // Display a card
     var hand = document.getElementById('hand_' + player.PlayerID);
     var cardObj = getCardUI(card, player);
+    cardObj.classList.add('unplayable');
 
     hand.appendChild(cardObj);
 
     repositionCards(player);
+
+    var myTurn = document.getElementById('player_' + playerId).classList.contains('active');
+
+    if(player.SocketID == socketId && myTurn) {
+        const topCard = {
+            Color: document.getElementById('discard').getAttribute('dataCardColor'),
+            Type: document.getElementById('discard').getAttribute('dataCardType')
+        };
+
+        const activeColor = currentColor || topCard.Color;
+
+        updatePlayableCards(topCard, activeColor);
+    }
 });
 
 socket.on('logMessage', function(message) {
     const messageContainer = document.getElementById('message-container');
     const messageElement = document.createElement('div');
     messageElement.classList.add('message');
-    messageElement.textContent = message;
+
+    const colors = {
+        red: '#FF5555',
+        yellow: '#FFAA01',
+        green: '#55AA55',
+        blue: '#5455FF',
+        black: 'black'
+    };
+    let formattedMessage = message;
+
+    for (const [color, hex] of Object.entries(colors)) {
+        const regex = new RegExp(`\\b${color}\\b`, 'gi');
+        formattedMessage = formattedMessage.replace(
+            regex,
+            `<span style="color: ${hex}; font-weight: bold;">${color}</span>`
+        );
+    }
+
+    messageElement.innerHTML = formattedMessage;
     messageContainer.insertBefore(messageElement, messageContainer.firstChild);
 });
 
@@ -169,11 +319,11 @@ function getCardUI(card, player) {
 
             // Bump cards up on the screen when they're hovered over
             cardObj.addEventListener('mouseenter', function () {
-            cardObj.style.transform = 'translateY(-50px)';
+                cardObj.style.transform = 'scale(0.6) translateY(-50px)';
             });
 
             cardObj.addEventListener('mouseleave', function () {
-            cardObj.style.transform = 'translateY(0)';
+                cardObj.style.transform = 'scale(0.6) translateY(0)';
             });
         }
     } else {
@@ -187,30 +337,23 @@ function getCardUI(card, player) {
 
 function repositionCards(player) {
     // Adjust card positioning as new cards get added to a hand
-    var hand = document.getElementById('hand_' + player.PlayerID);
-    var cards = hand.children;
-    var cardCount = cards.length;
+    const hand = document.getElementById('hand_' + player.PlayerID);
+    if (!hand) return;
+
+    const cards = Array.from(hand.children);
+    const cardCount = cards.length;
 
     if(player.SocketID == socketId) {
-        const cardArray = Array.from(cards);
-        cardArray.sort((a, b) => {
-            const aColor = a.getAttribute('dataCardColor');
-            const bColor = b.getAttribute('dataCardColor');
-            const colorComparison = aColor.localeCompare(bColor);
-
-            if(colorComparison == 0) {
-                const aType = a.getAttribute('dataCardType');
-                const bType = b.getAttribute('dataCardType');
-                return aType.localeCompare(bType);
-            }
-
-            return colorComparison;
+        cards.sort((a, b) => {
+            const colorDiff = a.getAttribute('dataCardColor').localeCompare(b.getAttribute('dataCardColor'));
+            if (colorDiff !== 0) return colorDiff;
+            return a.getAttribute('dataCardType').localeCompare(b.getAttribute('dataCardType'));
         });
 
         hand.innerHTML = '';
 
         var i = 0;
-        cardArray.forEach(card => {
+        cards.forEach(card => {
             // As more cards as drawn, overlap them more
             var marginLeft = i === 0 ? '-20' : -5 * (cardCount - 1) + 5;
             if(marginLeft < -59){marginLeft = -59;}
@@ -219,7 +362,62 @@ function repositionCards(player) {
 
             hand.appendChild(card);
         });
+    } else {
+        // For opponent hands, just append in order
+        hand.innerHTML = '';
+        cards.forEach((card, i) => hand.appendChild(card));
     }
+}
+
+function updatePlayableCards(topCard, currentColor) {
+    const hand = document.getElementById('hand_' + playerId);
+    if (!hand) return;
+
+    const cards = hand.querySelectorAll('.card');
+    const playWildDraw4Enabled = window.playWildDraw4Enabled || false;
+
+    const mustPlaySpecific = requiredPlay.length > 0;
+
+    let hasOtherPlayable = false;
+
+    // First pass: check if there are any other playable cards besides Wild Draw 4
+    cards.forEach(card => {
+        const cardColor = card.getAttribute('dataCardColor');
+        const cardType = card.getAttribute('dataCardType');
+
+        if (!mustPlaySpecific && cardType !== 'draw4') {
+            if (cardColor === currentColor || cardType === topCard.Type || cardColor === 'black') {
+                hasOtherPlayable = true;
+            }
+        }
+    });
+
+    cards.forEach(card => {
+        const cardColor = card.getAttribute('dataCardColor');
+        const cardType = card.getAttribute('dataCardType');
+
+        let playable = false;
+
+        if (mustPlaySpecific) {
+            playable = requiredPlay.includes(cardType);
+        } else {
+            if (cardColor === currentColor) playable = true;
+            if (cardType === topCard.Type) playable = true;
+
+            if (cardColor === 'black') {
+                if (cardType === 'wild') playable = true;
+                if (cardType === 'draw4') {
+                    playable = playWildDraw4Enabled ? true : !hasOtherPlayable;
+                }
+            }
+        }
+
+        if (playable) {
+            card.classList.remove('unplayable');
+        } else {
+            card.classList.add('unplayable');
+        }
+    });
 }
 
 function playCard(card, player) {
@@ -230,6 +428,8 @@ function playCard(card, player) {
 }
 
 socket.on('discardCard', function(card, player) {
+    currentColor = card.Color;
+
     // Add a card to the discard pile
     var cardObj = getCardUI(card);
     cardObj.id = 'discard';
@@ -243,6 +443,11 @@ socket.on('discardCard', function(card, player) {
 
     var discard = document.getElementById('discard');
     discard.parentNode.replaceChild(cardObj, discard);
+});
+
+socket.on('cardDrawn', function() {
+    const audio = new Audio('audio/draw-card.wav');
+    audio.play();
 });
 
 function setCookie(name, value, seconds) {
@@ -308,6 +513,11 @@ function createPlayersUI(players) {
         var div_hand = document.createElement('div');
         var div_points = document.createElement('div');
 
+        if(isPlayerA) {
+            div_player_name.style.cursor = 'pointer';
+            div_player_name.addEventListener('click', () => showBootModal(players[i].SocketID, players[i].Name));
+        }
+
         div_player_name.className = 'name';
         div_points.className = 'points';
         div_points.id = 'points_' + players[i].PlayerID;
@@ -363,11 +573,23 @@ function createPlayersUI(players) {
 }
 
 function unoMe() {
+    const btn = document.getElementById('btnUnoMe');
+    if (btn) {
+        btn.disabled = true;
+        btn.style.background = 'gray';
+    }
+
     // Send a message that the player called uno
     socket.emit('unoMe');
 }
 
 function unoYou() {
+    const btn = document.getElementById('btnUnoYou');
+    if (btn) {
+        btn.disabled = true;
+        btn.style.background = 'gray';
+    }
+    
     // Send a message that the player called uno on someone else
     socket.emit('unoYou');
 }
@@ -411,6 +633,38 @@ function init() {
     // Connect to the server
     socket.connect();
 }
+
+function showBootModal(playerName) {
+    const modal = document.getElementById('bootModal');
+    const msg = document.getElementById('bootMessage');
+    const confirmBtn = document.getElementById('confirmBoot');
+    const cancelBtn = document.getElementById('cancelBoot');
+
+    msg.textContent = `Are you sure you want to boot ${playerName}?`;
+    modal.style.display = 'flex';
+
+    confirmBtn.onclick = () => {
+        socket.emit('bootPlayer', playerName);
+        modal.style.display = 'none';
+    };
+
+    cancelBtn.onclick = () => {
+        modal.style.display = 'none';
+    };
+}
+
+socket.on('booted', () => {
+    socket.io.opts.reconnection = false; // stop Socket.IO from auto-reconnecting
+    socket.disconnect(); // force disconnection from server
+
+    // Optional: replace page content so they can’t keep playing
+    document.body.innerHTML = `
+        <div style="text-align:center; margin-top:100px;">
+            <h1>You have been booted from the game.</h1>
+            <p>Refresh to return to the lobby.</p>
+        </div>
+    `;
+});
 
 
 init();
