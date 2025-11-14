@@ -193,7 +193,6 @@ function onConnection(socket) {
                     if(skipDraw4) requiredPlay.push('skip');
                     if(reverseDraw4) requiredPlay.push('reverse');
                     io.to(socket.id).emit('chooseColor');
-                    io.emit('requiredPlay', requiredPlay);
                 } else if(playType == 'skip' || (playType == 'reverse' && players.size == 2)) {
                     // Skip - jump over the next player
                     nextTurn(true);
@@ -202,6 +201,8 @@ function onConnection(socket) {
                     if (cardsToDraw > 0) {
                         drawCards(currentPlayer, cardsToDraw);
                     }
+                    requiredPlay = [];
+                    io.emit('requiredPlay', requiredPlay);
                     nextTurn();
                 } else if(playType == 'reverse') {
                     // Reverse - change the direction of play
@@ -213,6 +214,8 @@ function onConnection(socket) {
                         drawCards(currentPlayer, cardsToDraw);
                         nextTurn();
                     }
+                    requiredPlay = [];
+                    io.emit('requiredPlay', requiredPlay);
                 } else if(playType == 'draw2') {
                     // Draw 2 - queue up 2 more cards to be drawn
                     cardsToDraw += 2;
@@ -231,6 +234,8 @@ function onConnection(socket) {
 
                     if(!canPlay(currentPlayer, tempArray)) {
                         drawCards(currentPlayer, cardsToDraw);
+                        requiredPlay = [];
+                        io.emit('requiredPlay', requiredPlay);
                         nextTurn();
                     }
                 } else {
@@ -257,36 +262,29 @@ function onConnection(socket) {
         io.emit('colorChosen', color);
         io.emit('logMessage', 'The color was changed to ' + color);
         
-        if (cardsToDraw == 0) {
-            nextTurn();
-        }
-        
         // For handling wild draw 4
         if(cardsToDraw > 0) {
             nextTurn(true);
 
-            // Let the player stack a draw 4 if they can
-            if(stackDraw4) {
-                requiredPlay.push('draw4');
-                io.emit('requiredPlay', requiredPlay);
-            }
+            requiredPlay = [];
 
-            if(skipDraw4) {
-                requiredPlay.push('skip');
-                io.emit('requiredPlay', requiredPlay);
-            }
+            // Let the player stack on a draw 4 if they can
+            if(stackDraw4) requiredPlay.push('draw4');
+            if(skipDraw4) requiredPlay.push('skip');
+            if(reverseDraw4) requiredPlay.push('reverse');
 
-            if(reverseDraw4) {
-                requiredPlay.push('reverse');
-                io.emit('requiredPlay', requiredPlay);
-            }
+            io.emit('requiredPlay', requiredPlay);
 
             let tempArray = cardList.filter(item => !requiredPlay.includes(item));
 
             if(!canPlay(currentPlayer, tempArray)) {
                 drawCards(currentPlayer, cardsToDraw);
+                requiredPlay = [];
+                io.emit('requiredPlay', requiredPlay);
                 nextTurn();
             }
+        } else {
+            nextTurn();
         }
     });
 
@@ -535,7 +533,7 @@ function dealHands() {
         // Discard 1 card to start the game until we start on something other than a wild
         card = deck.pop();
         discardCard(card, -1);
-    } while(currentColor == 'black')
+    } while(card.Type === 'wild' || card.Type === 'draw4')
 }
 
 function performDraw(player) {
@@ -646,7 +644,7 @@ function discardCard(card, SocketID) {
 
     // Add the card to the discard pile and update the game's current color/card type
     discardPile.push(card);
-    currentColor = card.Color;
+    if (card.Color !== 'black') currentColor = card.Color;
     currentType = card.Type;
     io.emit('discardCard', card, player);
 }
