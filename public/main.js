@@ -13,6 +13,7 @@ let isPlayerA = false;
 let playerAName = null;
 let currentColor = null;
 let bootTargetId = null;
+let requiredPlay = [];
 
 const sidePanel = document.getElementById('side-panel');
 const collapseButton = document.getElementById('collapse-btn');
@@ -124,6 +125,11 @@ socket.on('newPlayer', function(data) {
 socket.on('chooseColor', function() {
     // Display the buttons to let the player pick a color after wild
     document.getElementById('color-buttons').style.display="flex";
+
+    const hand = document.getElementById('hand_' + playerId);
+    if (hand) {
+        hand.querySelectorAll('.card').forEach(c => c.classList.add('unplayable'));
+    }
 });
 
 socket.on('colorChosen', function(color) {
@@ -139,6 +145,17 @@ socket.on('hideColor', function() {
 
 socket.on('hideDraw', function() {
     document.getElementById('btnDraw').style.display="none";
+});
+
+socket.on('requiredPlay', list => {
+    requiredPlay = list;
+
+    const topCard = {
+        Color: document.getElementById('discard').getAttribute('dataCardColor'),
+        Type: document.getElementById('discard').getAttribute('dataCardType')
+    };
+    
+    updatePlayableCards(topCard, currentColor);
 });
 
 socket.on('turnChange', function(PlayerID) {
@@ -359,6 +376,8 @@ function updatePlayableCards(topCard, currentColor) {
     const cards = hand.querySelectorAll('.card');
     const playWildDraw4Enabled = window.playWildDraw4Enabled || false;
 
+    const mustPlaySpecific = requiredPlay.length > 0;
+
     let hasOtherPlayable = false;
 
     // First pass: check if there are any other playable cards besides Wild Draw 4
@@ -366,7 +385,7 @@ function updatePlayableCards(topCard, currentColor) {
         const cardColor = card.getAttribute('dataCardColor');
         const cardType = card.getAttribute('dataCardType');
 
-        if (cardType !== 'draw4') {
+        if (!mustPlaySpecific && cardType !== 'draw4') {
             if (cardColor === currentColor || cardType === topCard.Type || cardColor === 'black') {
                 hasOtherPlayable = true;
             }
@@ -379,17 +398,16 @@ function updatePlayableCards(topCard, currentColor) {
 
         let playable = false;
 
-        if (cardColor === currentColor) playable = true;
-        if (cardType === topCard.Type) playable = true;
+        if (mustPlaySpecific) {
+            playable = requiredPlay.includes(cardType);
+        } else {
+            if (cardColor === currentColor) playable = true;
+            if (cardType === topCard.Type) playable = true;
 
-        if (cardColor === 'black') {
-            if (cardType === 'wild') {
-                playable = true;
-            } else if (cardType === 'draw4') {
-                if (playWildDraw4Enabled) {
-                    playable = true;
-                } else {
-                    playable = !hasOtherPlayable;
+            if (cardColor === 'black') {
+                if (cardType === 'wild') playable = true;
+                if (cardType === 'draw4') {
+                    playable = playWildDraw4Enabled ? true : !hasOtherPlayable;
                 }
             }
         }

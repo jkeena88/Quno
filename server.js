@@ -1,3 +1,4 @@
+const { pl } = require('date-fns/locale');
 const express = require('express');
 const app = express();
 const server = require('http').Server(app);
@@ -26,6 +27,8 @@ let stackDraw2 = false;
 let skipDraw2 = false;
 let reverseDraw2 = false;
 let stackDraw4 = false;
+let skipDraw4 = false;
+let reverseDraw4 = false;
 let gameIsOver = false;
 let cardList = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 'skip', 'reverse', 'draw2', 'wild', 'draw4']
 let requiredPlay = new Array();
@@ -55,7 +58,7 @@ function onConnection(socket) {
                 }
                 
                 io.emit('setHost', hostName);
-                io.emit('newPlayer', playersInLobby);
+                io.emit('newPlayer', { players: playersInLobby, host: hostName });
                 io.emit('logMessage', targetName + ' was booted by the host');
 
                 if (targetName === hostName) {
@@ -73,7 +76,7 @@ function onConnection(socket) {
     // Remove a player if they leave
     socket.on('disconnect', () => {
         playersInLobby = playersInLobby.filter(player => player !== socket.playerName);
-        io.emit('newPlayer', playersInLobby);
+        io.emit('newPlayer', { players: playersInLobby, host: hostName });
 
         if(socket.id == playerA && socket.playerName === hostName) {
             const stillHere = Array.from(io.sockets.sockets.values()).some(s => s.playerName === hostName);
@@ -141,6 +144,10 @@ function onConnection(socket) {
     });
 
     socket.on('playCard', function(card) {
+        let player = players.get(socket.id);
+        if (!player) return;
+        if (player.WaitingForColorChoice) return;
+
         // Attempt to play a card
         let playColor = card.Color;
         let playType = card.Type;
@@ -164,6 +171,7 @@ function onConnection(socket) {
             // In some scenarios, like stacking draw 2s, there's another check to see if there's a certain requirement for the next play
             if((colorMatch || typeMatch || wild || draw4wild) && (requiredPlay.length == 0 || requiredPlay.includes(playType))) {
                 requiredPlay = new Array();
+                io.to(currentPlayer).emit('requiredPlay', requiredPlay);
                 discardCard(card, socket.id);
                 io.emit('hideColor');
                 io.emit('logMessage', socket.playerName + ' played a ' + playColor + ' ' + playType);
@@ -173,11 +181,19 @@ function onConnection(socket) {
 
                 if(playType == 'wild') {
                     // Wild - have the player choose a new color
+                    player.WaitingForColorChoice = true; // ⬅ LOCK player actions
                     io.to(socket.id).emit('chooseColor');
                 } else if(playType == 'draw4') {
                     // Wild draw 4 - queue up 4 more cards to be drawn, then have the player choose a new color
                     cardsToDraw += 4;
+                    player.WaitingForColorChoice = true; // ⬅ LOCK player actions
+
+                    requiredPlay = [];
+                    if(stackDraw4) requiredPlay.push('draw4');
+                    if(skipDraw4) requiredPlay.push('skip');
+                    if(reverseDraw4) requiredPlay.push('reverse');
                     io.to(socket.id).emit('chooseColor');
+                    io.emit('requiredPlay', requiredPlay);
                 } else if(playType == 'skip' || (playType == 'reverse' && players.size == 2)) {
                     // Skip - jump over the next player
                     nextTurn(true);
@@ -203,17 +219,12 @@ function onConnection(socket) {
                     nextTurn(true);
 
                     // Check all the game options for playing on draw 2s
-                    if(stackDraw2) {
-                        requiredPlay.push('draw2');
-                    }
+                    requiredPlay = [];
+                    if(stackDraw2) requiredPlay.push('draw2');
+                    if(skipDraw2) requiredPlay.push('skip');
+                    if(reverseDraw2) requiredPlay.push('reverse');
 
-                    if(skipDraw2) {
-                        requiredPlay.push('skip');
-                    }
-
-                    if(reverseDraw2) {
-                        requiredPlay.push('reverse');
-                    }
+                    io.to(currentPlayer).emit('requiredPlay', requiredPlay);
 
                     // See whether the next player has any cards they can stack
                     let tempArray = cardList.filter(item => !requiredPlay.includes(item));
@@ -236,9 +247,14 @@ function onConnection(socket) {
     });
 
     socket.on('colorChosen', function(color) {
+        let player = players.get(socket.id);
+        if (!player) return;
+
+        player.WaitingForColorChoice = false;
+
         // A new color was chosen
-        io.emit('colorChosen', color);
         currentColor = color;
+        io.emit('colorChosen', color);
         io.emit('logMessage', 'The color was changed to ' + color);
         
         if (cardsToDraw == 0) {
@@ -252,6 +268,17 @@ function onConnection(socket) {
             // Let the player stack a draw 4 if they can
             if(stackDraw4) {
                 requiredPlay.push('draw4');
+                io.emit('requiredPlay', requiredPlay);
+            }
+
+            if(skipDraw4) {
+                requiredPlay.push('skip');
+                io.emit('requiredPlay', requiredPlay);
+            }
+
+            if(reverseDraw4) {
+                requiredPlay.push('reverse');
+                io.emit('requiredPlay', requiredPlay);
             }
 
             let tempArray = cardList.filter(item => !requiredPlay.includes(item));
@@ -355,6 +382,18 @@ function onConnection(socket) {
             stackDraw4 = false;
         }
 
+        if(selectedOptions.includes('skipDraw4')) {
+            skipDraw4 = true;
+        } else {
+            skipDraw4 = false;
+        }
+
+        if(selectedOptions.includes('reverseDraw4')) {
+            reverseDraw4 = true;
+        } else {
+            reverseDraw4 = false;
+        }
+
         io.emit('updateOptions', {
             playWildDraw4
         });
@@ -449,6 +488,7 @@ function createPlayers() {
             LastUnoMeTime: 0,
             LastUnoYouTime: 0
         };
+        player.WaitingForColorChoice = false;
         players.set(socket.id, player);
         i++;
     });
@@ -650,6 +690,7 @@ function nextTurn(skipAutoDraw = false) {
 
     player = players.get(currentPlayer);
     requiredPlay = new Array();
+    io.to(currentPlayer).emit('requiredPlay', requiredPlay);
     io.emit('turnChange', currentPlayerID);
 }
 
@@ -685,6 +726,7 @@ function startGame() {
     cardsToDraw = 0;
     discardPile = new Array();
     requiredPlay = new Array();
+    io.emit('requiredPlay', requiredPlay);
     io.emit('notCalledUnoMe');
     io.emit('colorChosen', 'red');
     io.emit('hideColor');
