@@ -29,6 +29,7 @@ let stackType = null;    // 'draw2' | 'draw4' | null — which draw type is curr
 let pendingSkipTarget = null; // socket ID of the player who is about to be skipped (null if no skip pending)
 let discardPile = [];
 let players = new Map(); // socket ID → player object
+let pendingPlayers = []; // socket IDs of players waiting to join at the next hand start
 let playersInLobby = []; // ordered list of player names, for the lobby display
 let hostName = null;
 let deck = [];
@@ -86,6 +87,7 @@ function onConnection(socket) {
 
                 // Clean up state before disconnecting to prevent a race with the disconnect handler
                 playersInLobby = playersInLobby.filter(p => p !== targetName);
+                pendingPlayers = pendingPlayers.filter(id => id !== targetSocketId);
                 players.delete(targetSocketId);
 
                 targetSocket.disconnect(true);
@@ -138,6 +140,7 @@ function onConnection(socket) {
 
             if (!hasRejoined) {
                 playersInLobby = playersInLobby.filter(p => p !== disconnectedName);
+                pendingPlayers = pendingPlayers.filter(id => id !== disconnectedId);
                 const leavingPlayer = players.get(disconnectedId);
                 const leavingPlayerId = leavingPlayer ? leavingPlayer.PlayerID : -1;
                 players.delete(disconnectedId);
@@ -237,6 +240,16 @@ function onConnection(socket) {
             io.emit('newPlayer', {players: playersInLobby, host: hostName});
             io.emit('logMessage', playerName + ' joined the game');
 
+            // If a hand is currently in progress, hold this player in a pending queue
+            // rather than adding them to the active game — they'll join at the next hand.
+            if (!gameIsOver && players.size > 0) {
+                if (!pendingPlayers.includes(socket.id)) {
+                    pendingPlayers.push(socket.id);
+                }
+                io.to(socket.id).emit('pendingJoin');
+                return;
+            }
+
             return;
         } else {
             io.to(socket.id).emit('responseRoom', 'error');
@@ -249,6 +262,7 @@ function onConnection(socket) {
         matchStartTime = Date.now();
         handsPlayed = 0;
         matchCardsPlayed = 0;
+        pendingPlayers = [];
 
         if(playerCount > 1) {
             io.emit('logMessage', 'A new match was started');
@@ -259,6 +273,37 @@ function onConnection(socket) {
 
     // Deal a new hand without resetting scores
     socket.on('newHand', function() {
+        // Absorb any players who joined during the previous hand
+        if (pendingPlayers.length > 0) {
+            const nextID = players.size; // start assigning IDs after existing players
+            pendingPlayers.forEach((pendingSocketId, i) => {
+                const pendingSocket = io.sockets.sockets.get(pendingSocketId);
+                if (!pendingSocket) return; // socket disconnected before hand ended
+                const player = {
+                    Name: pendingSocket.playerName,
+                    PlayerID: nextID + i,
+                    Points: 0,
+                    HandsWon: 0,
+                    Hand: [],
+                    SocketID: pendingSocketId,
+                    HasCalledUno: false,
+                    HasCalledUnoMeThisTurn: false,
+                    HasCalledUnoYou: false,
+                    LastUnoMeTime: 0,
+                    LastUnoYouTime: 0,
+                    HandCardsPlayed: 0,
+                    MatchCardsPlayed: 0,
+                    HandTurnTime: 0,
+                    MatchTurnTime: 0,
+                    PointsGivenUp: 0,
+                    WaitingForColorChoice: false
+                };
+                players.set(pendingSocketId, player);
+                io.emit('logMessage', pendingSocket.playerName + ' joined the game');
+            });
+            pendingPlayers = [];
+        }
+
         io.emit('logMessage', 'A new hand was dealt');
         reshuffleSeats();
         startGame();
