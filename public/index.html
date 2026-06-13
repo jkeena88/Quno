@@ -93,9 +93,32 @@
         </div>
 
 
-        <div class="side-panel" id="side-panel">
-            <button id="collapse-btn" class="collapse-button">&#9654;</button>
-            <div id="message-container"></div>
+        <div class="side-panel flex-vertical-container" id="side-panel">
+
+            <div><button id="collapse-btn" class="collapse-button">&#9654;</button></div>
+
+            <div class="config-container panel-container" id="config-container">
+
+                <h3>Configuration:</h3>
+                <label for="draw-sound">Draw sound:</label>
+
+                <select name="Sound" id="draw-sound">
+                    <option value="audio/draw-card.wav">Boring Sound</option>
+                    <option value="audio/gunshot-01.mp3">Gunshot 01</option>
+                    <option value="audio/gunshot-02.wav">Gunshot 02</option>
+                    <option value="audio/gunshot-03.wav">Gunshot 03</option>
+                    <option value="audio/gunshot-04.wav">Gunshot 04</option>
+                    <option value="audio/gunshot-05.mp3">Gunshot 05</option>
+                </select>
+            </div>
+            <hr></hr>
+            <div class="panel-container">
+            <h3>Messages:</h3>
+            <div id="message-container">
+
+
+            </div></div>
+
         </div>
 
         <div id="bootModal" class="modal">

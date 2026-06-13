@@ -693,6 +693,7 @@ hr {
 /* ── Side panel ── */
 
 .side-panel {
+
     width: 260px;
     min-width: 260px;
     background-color: var(--bg-surface);
@@ -701,11 +702,14 @@ hr {
     font-size: 13px;
     transition: width 0.25s ease, min-width 0.25s ease;
     display: flex;
+    flex-direction: column;
     height: 100vh;
     overflow-y: hidden;
     flex-shrink: 0;
     position: relative;
     z-index: 10;
+    padding-left: 5px;
+
 }
 
 .side-panel.collapsed {
@@ -713,7 +717,8 @@ hr {
     min-width: 34px;
 }
 .side-panel.collapsed .collapse-button { transform: rotate(180deg); }
-.side-panel.collapsed .message { display: none; }
+.side-panel.collapsed .panel-container { display: none; }
+/*.side-panel.collapsed .message { display: none; }*/
 
 .collapse-button {
     background: transparent;
@@ -907,4 +912,8 @@ hr {
 
 .modal-warning {
     margin-top: 8px;
+}
+
+.config-container {
+    padding-bottom: 10px;
 }

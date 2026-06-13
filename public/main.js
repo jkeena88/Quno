@@ -963,7 +963,8 @@ socket.on('discardCard', function(card, player) {
 });
 
 socket.on('cardDrawn', function() {
-    playSound('audio/draw-card.wav');
+    let f = document.getElementById("draw-sound")?.value ?? "audio/draw-card.wav";
+    playSound(f);
 });
 
 // ── Persistence ──
