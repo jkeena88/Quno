@@ -222,6 +222,13 @@ socket.on('gameStarted', function(playerList) {
     createPlayersUI(playerList);
 });
 
+// Show a holding message when the player joins mid-hand and must wait for the next deal
+socket.on('pendingJoin', function() {
+    const overlay = document.getElementById('waitingOverlay');
+    overlay.textContent = 'A hand is in progress — you will join at the start of the next hand';
+    overlay.style.display = 'flex';
+});
+
 // Show or hide the waiting overlay for non-host players
 function updateWaitingOverlay() {
     if (gameInProgress) return;

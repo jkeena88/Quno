@@ -18,6 +18,7 @@ server.listen(port, () => console.log('listening on port ' + port));
 // ── Game constants ──
 const maxPlayers = 8;
 const CARD_DRAW_DELAY_MS = 300; // milliseconds between each card drawn in a multi-draw sequence
+const REJOIN_GRACE_MS = 10000;  // how long to wait before treating a disconnect as a permanent leave
 
 // ── Game state ──
 let playDirection = -1;  // 1 = clockwise, -1 = counter-clockwise
@@ -29,6 +30,7 @@ let stackType = null;    // 'draw2' | 'draw4' | null — which draw type is curr
 let pendingSkipTarget = null; // socket ID of the player who is about to be skipped (null if no skip pending)
 let discardPile = [];
 let players = new Map(); // socket ID → player object
+let pendingPlayers = []; // socket IDs of players waiting to join at the next hand start
 let playersInLobby = []; // ordered list of player names, for the lobby display
 let hostName = null;
 let deck = [];
@@ -66,31 +68,37 @@ function onConnection(socket) {
     // Boot a player from the game (host only)
     socket.on('bootPlayer', (targetName) => {
         if(socket.id == playerA) {
+            // Try to find a live socket first; if the player navigated away their socket
+            // is already gone, so fall back to looking them up in the players Map by name.
             const targetSocket = Array.from(io.sockets.sockets.values()).find(s => s.playerName === targetName);
-            if(targetSocket) {
-                // Capture the socket ID before disconnecting — it may become stale after disconnect(true)
-                const targetSocketId = targetSocket.id;
+            const targetPlayerEntry = targetSocket
+                ? players.get(targetSocket.id)
+                : Array.from(players.values()).find(p => p.Name === targetName);
+
+            if (targetPlayerEntry) {
+                const targetSocketId = targetPlayerEntry.SocketID;
                 const wasCurrentPlayer = (targetSocketId === currentPlayer);
 
-                // Flag the socket so the disconnect handler skips its grace-period cleanup
-                targetSocket.wasBooted = true;
+                if (targetSocket) {
+                    // Player is still connected — tell their browser and disconnect them
+                    targetSocket.wasBooted = true;
+                    targetSocket.emit('booted');
+                    targetSocket.disconnect(true);
+                }
+                // (If the socket is already gone we just do state cleanup below)
 
-                targetSocket.emit('booted');
-
-                // If it's the booted player's turn, advance BEFORE removing them —
-                // nextTurn() calls players.get(currentPlayer) and crashes if they're already gone.
-                // Also skip if only 1 player would remain: no turn to advance to.
+                // If it's the booted player's turn, advance BEFORE removing them
                 if (wasCurrentPlayer && players.size > 2) {
                     nextTurn();
                 }
 
-                // Clean up state before disconnecting to prevent a race with the disconnect handler
+                // Clean up all server state for this player
                 playersInLobby = playersInLobby.filter(p => p !== targetName);
+                pendingPlayers = pendingPlayers.filter(id => id !== targetSocketId);
+                const leavingPlayerId = targetPlayerEntry.PlayerID;
                 players.delete(targetSocketId);
 
-                targetSocket.disconnect(true);
-
-                io.emit('playerLeft', { playerName: targetName, playerId: -1 });
+                io.emit('playerLeft', { playerName: targetName, playerId: leavingPlayerId });
                 io.emit('setHost', hostName);
                 io.emit('newPlayer', { players: playersInLobby, host: hostName });
                 io.emit('logMessage', targetName + ' was booted by the host');
@@ -111,7 +119,6 @@ function onConnection(socket) {
 
         const disconnectedName = socket.playerName;
         const disconnectedId = socket.id;
-        const REJOIN_GRACE_MS = 10000; // how long to wait before treating a disconnect as a permanent leave
 
         // If the host disconnected, promote a new host immediately — don't wait
         // for the grace period, so other players aren't stuck on the waiting overlay.
@@ -130,16 +137,24 @@ function onConnection(socket) {
             }
         }
 
+        // Stamp the disconnect time so requestJoin can enforce the grace window
+        const disconnectedPlayer = players.get(disconnectedId);
+        if (disconnectedPlayer) {
+            disconnectedPlayer.disconnectedAt = Date.now();
+        }
+
         setTimeout(() => {
-            // Check if the player rejoined with a new socket during the grace period
-            const hasRejoined = Array.from(players.values()).some(
-                p => p.Name === disconnectedName
-            );
+            // The player rejoined successfully if their old socket ID was replaced in the
+            // map (disconnectedAt cleared) or if the old entry is simply gone (new socket
+            // took over). If the entry still has a disconnectedAt stamp it means nobody
+            // has reclaimed this slot — treat it as a permanent leave.
+            const entry = players.get(disconnectedId);
+            const hasRejoined = !entry || entry.disconnectedAt === undefined;
 
             if (!hasRejoined) {
                 playersInLobby = playersInLobby.filter(p => p !== disconnectedName);
-                const leavingPlayer = players.get(disconnectedId);
-                const leavingPlayerId = leavingPlayer ? leavingPlayer.PlayerID : -1;
+                pendingPlayers = pendingPlayers.filter(id => id !== disconnectedId);
+                const leavingPlayerId = entry ? entry.PlayerID : -1;
                 players.delete(disconnectedId);
                 io.emit('playerLeft', { playerName: disconnectedName, playerId: leavingPlayerId });
                 io.emit('newPlayer', { players: playersInLobby, host: hostName });
@@ -161,10 +176,19 @@ function onConnection(socket) {
         let rejoiningPlayer = null;
         for (let [oldSocketId, player] of players.entries()) {
             if (player.Name === playerName) {
+                // Only allow the rejoin if still within the grace window
+                const withinGrace = player.disconnectedAt !== undefined &&
+                    (Date.now() - player.disconnectedAt) < REJOIN_GRACE_MS;
+                // Also allow if disconnectedAt is undefined (they never disconnected —
+                // e.g. duplicate tab opened by the same player while still connected)
+                const neverDisconnected = player.disconnectedAt === undefined;
+                if (!withinGrace && !neverDisconnected) break; // grace expired — fall through to new-player path
+
                 rejoiningPlayer = player;
-                // Swap the old socket ID for the new one
+                // Swap the old socket ID for the new one and clear the disconnect stamp
                 players.delete(oldSocketId);
                 player.SocketID = socket.id;
+                player.disconnectedAt = undefined;
                 players.set(socket.id, player);
 
                 if (currentPlayer === oldSocketId) {
@@ -237,6 +261,16 @@ function onConnection(socket) {
             io.emit('newPlayer', {players: playersInLobby, host: hostName});
             io.emit('logMessage', playerName + ' joined the game');
 
+            // If a hand is currently in progress, hold this player in a pending queue
+            // rather than adding them to the active game — they'll join at the next hand.
+            if (!gameIsOver && players.size > 0) {
+                if (!pendingPlayers.includes(socket.id)) {
+                    pendingPlayers.push(socket.id);
+                }
+                io.to(socket.id).emit('pendingJoin');
+                return;
+            }
+
             return;
         } else {
             io.to(socket.id).emit('responseRoom', 'error');
@@ -249,6 +283,7 @@ function onConnection(socket) {
         matchStartTime = Date.now();
         handsPlayed = 0;
         matchCardsPlayed = 0;
+        pendingPlayers = [];
 
         if(playerCount > 1) {
             io.emit('logMessage', 'A new match was started');
@@ -259,6 +294,37 @@ function onConnection(socket) {
 
     // Deal a new hand without resetting scores
     socket.on('newHand', function() {
+        // Absorb any players who joined during the previous hand
+        if (pendingPlayers.length > 0) {
+            const nextID = players.size; // start assigning IDs after existing players
+            pendingPlayers.forEach((pendingSocketId, i) => {
+                const pendingSocket = io.sockets.sockets.get(pendingSocketId);
+                if (!pendingSocket) return; // socket disconnected before hand ended
+                const player = {
+                    Name: pendingSocket.playerName,
+                    PlayerID: nextID + i,
+                    Points: 0,
+                    HandsWon: 0,
+                    Hand: [],
+                    SocketID: pendingSocketId,
+                    HasCalledUno: false,
+                    HasCalledUnoMeThisTurn: false,
+                    HasCalledUnoYou: false,
+                    LastUnoMeTime: 0,
+                    LastUnoYouTime: 0,
+                    HandCardsPlayed: 0,
+                    MatchCardsPlayed: 0,
+                    HandTurnTime: 0,
+                    MatchTurnTime: 0,
+                    PointsGivenUp: 0,
+                    WaitingForColorChoice: false
+                };
+                players.set(pendingSocketId, player);
+                io.emit('logMessage', pendingSocket.playerName + ' joined the game');
+            });
+            pendingPlayers = [];
+        }
+
         io.emit('logMessage', 'A new hand was dealt');
         reshuffleSeats();
         startGame();
