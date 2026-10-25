@@ -37,6 +37,7 @@ let pendingSkipTarget = null; // socket ID of the player who is about to be skip
 let discardPile = [];
 let players = new Map(); // socket ID → player object
 let pendingPlayers = []; // socket IDs of players waiting to join at the next hand start
+let waitingList = [];    // socket IDs waiting for a seat because the game is full (oldest first)
 let playersInLobby = []; // ordered list of player names, for the lobby display
 let hostName = null;
 let deck = [];
@@ -81,6 +82,14 @@ function onConnection(socket) {
         // If this socket was booted by the host, bootPlayer already cleaned everything up
         if (socket.wasBooted) return;
 
+        // Someone waiting for a seat just stops waiting; nothing else to clean up
+        if (waitingList.includes(socket.id)) {
+            waitingList = waitingList.filter(id => id !== socket.id);
+            recordEvent(`${socket.playerName} stopped waiting for a seat`);
+            waitingList.forEach((id, i) => io.to(id).emit('roomFull', { position: i + 1, maxPlayers }));
+            return;
+        }
+
         const disconnectedName = socket.playerName;
         const disconnectedId = socket.id;
 
@@ -107,7 +116,9 @@ function onConnection(socket) {
             // took over). If the entry still has a disconnectedAt stamp it means nobody
             // has reclaimed this slot — treat it as a permanent leave.
             const entry = players.get(disconnectedId);
-            const hasRejoined = !entry || entry.disconnectedAt === undefined;
+            const hasRejoined = entry
+                ? entry.disconnectedAt === undefined
+                : (!disconnectedName || Array.from(io.sockets.sockets.values()).some(s => s.playerName === disconnectedName));
 
             if (!hasRejoined) {
                 playersInLobby = playersInLobby.filter(p => p !== disconnectedName);
@@ -121,6 +132,7 @@ function onConnection(socket) {
                 if (disconnectedId === currentPlayer && !gameIsOver) {
                     nextTurn();
                 }
+                if (players.size === 0) promoteWaiting(); // no match yet: seat the next person right away
             }
         }, REJOIN_GRACE_MS);
     });
@@ -210,38 +222,33 @@ function onConnection(socket) {
 
         io.to(socket.id).emit('updateOptions', { playWildDraw4, stackDraw2, skipDraw2, reverseDraw2, skipSkip, stackDraw4, skipDraw4, reverseDraw4 });
 
-        let people;
-        try {
-            people = io.sockets.sockets.size;
-        } catch (e) {
-            people = 0;
+        // Game is full (or others are already queued ahead of this person): wait for a seat
+        if (!playersInLobby.includes(playerName) &&
+            (playersInLobby.length >= maxPlayers || waitingList.length > 0)) {
+            if (!waitingList.includes(socket.id)) waitingList.push(socket.id);
+            io.to(socket.id).emit('roomFull', { position: waitingList.indexOf(socket.id) + 1, maxPlayers });
+            logEvent(playerName + ' is waiting for a seat (the game is full)');
+            return;
         }
 
-        if(people < maxPlayers) {
-            socket.join();
-            if (!playersInLobby.includes(playerName)) {
-                playersInLobby.push(playerName);
-            }
-            io.to(socket.id).emit('responseRoom', [people + 1, maxPlayers]);
-            io.emit('newPlayer', {players: playersInLobby, host: hostName});
-            logEvent(playerName + ' joined the game');
-            if (becameHost) {
-                logEvent(playerName + ' is now the host');
-            }
+        socket.join();
+        if (!playersInLobby.includes(playerName)) {
+            playersInLobby.push(playerName);
+        }
+        io.to(socket.id).emit('responseRoom', [playersInLobby.length, maxPlayers]);
+        io.emit('newPlayer', {players: playersInLobby, host: hostName});
+        logEvent(playerName + ' joined the game');
+        if (becameHost) {
+            logEvent(playerName + ' is now the host');
+        }
 
-            // If a hand is currently in progress, hold this player in a pending queue
-            // rather than adding them to the active game — they'll join at the next hand.
-            if (!gameIsOver && players.size > 0) {
-                if (!pendingPlayers.includes(socket.id)) {
-                    pendingPlayers.push(socket.id);
-                }
-                io.to(socket.id).emit('pendingJoin');
-                return;
+        // If a hand is currently in progress, hold this player in a pending queue
+        // rather than adding them to the active game — they'll join at the next hand.
+        if (!gameIsOver && players.size > 0) {
+            if (!pendingPlayers.includes(socket.id)) {
+                pendingPlayers.push(socket.id);
             }
-
-            return;
-        } else {
-            io.to(socket.id).emit('responseRoom', 'error');
+            io.to(socket.id).emit('pendingJoin');
         }
     });
 
@@ -521,12 +528,37 @@ function promoteNextHost(excludeId) {
     playerA = null;
     hostName = null;
     const next = Array.from(io.sockets.sockets.values())
-        .find(s => s.id !== excludeId && s.playerName);
+        .find(s => s.id !== excludeId && s.playerName && !waitingList.includes(s.id));
     if (next) assignHost(next);
 }
 
+// Connected people who hold a seat in the lobby (everyone except those waiting for room)
+function lobbySockets() {
+    return Array.from(io.sockets.sockets.values())
+        .filter(s => s.playerName && !waitingList.includes(s.id));
+}
+
+// Give open seats to the people waiting, oldest first
+function promoteWaiting() {
+    let promoted = false;
+    while (waitingList.length > 0 && playersInLobby.length < maxPlayers) {
+        const id = waitingList.shift();
+        const s = io.sockets.sockets.get(id);
+        if (!s || playersInLobby.includes(s.playerName)) continue;
+        playersInLobby.push(s.playerName);
+        if (players.size > 0) pendingPlayers.push(id); // absorbed by dealNewHand
+        io.to(id).emit('roomJoined');
+        logEvent(s.playerName + ' joined the game');
+        promoted = true;
+    }
+    if (promoted) io.emit('newPlayer', { players: playersInLobby, host: hostName });
+    waitingList.forEach((id, i) => io.to(id).emit('roomFull', { position: i + 1, maxPlayers }));
+    if (playerA === null) promoteNextHost(null);
+}
+
 function startNewMatch() {
-    if (io.sockets.sockets.size < 2) return false;
+    promoteWaiting();
+    if (lobbySockets().length < 2) return false;
     matchStartTime = Date.now();
     handsPlayed = 0;
     matchCardsPlayed = 0;
@@ -540,14 +572,21 @@ function startNewMatch() {
 
 function dealNewHand() {
     // Absorb any players who joined during the previous hand
+    promoteWaiting();
+
+    // Close any gaps left by players who left, so seat IDs run 0..n-1
+    Array.from(players.values())
+        .sort((a, b) => a.PlayerID - b.PlayerID)
+        .forEach((p, i) => { p.PlayerID = i; });
+
     if (pendingPlayers.length > 0) {
-        const nextID = players.size; // start assigning IDs after existing players
-        pendingPlayers.forEach((pendingSocketId, i) => {
+        let nextID = players.size; // start assigning IDs after existing players
+        pendingPlayers.forEach((pendingSocketId) => {
             const pendingSocket = io.sockets.sockets.get(pendingSocketId);
             if (!pendingSocket) return; // socket disconnected before hand ended
             const player = {
                 Name: pendingSocket.playerName,
-                PlayerID: nextID + i,
+                PlayerID: nextID++,
                 Points: 0,
                 HandsWon: 0,
                 Hand: [],
@@ -627,6 +666,8 @@ function bootPlayerByName(targetName) {
         playersInLobby = playersInLobby.filter(p => p !== targetName);
         pendingPlayers = pendingPlayers.filter(id => id !== targetSocket.id);
         io.emit('newPlayer', { players: playersInLobby, host: hostName });
+        waitingList = waitingList.filter(id => id !== targetSocket.id);
+        if (players.size === 0) promoteWaiting();
         logEvent(targetName + ' was booted');
     }
 }
@@ -657,7 +698,7 @@ function createDeck() {
 function createPlayers() {
     players.clear();
 
-    Array.from(io.sockets.sockets.values()).forEach((socket, i) => {
+    lobbySockets().forEach((socket, i) => {
         const player = {
             Name: socket.playerName,
             PlayerID: i,

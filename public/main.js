@@ -19,6 +19,7 @@ let playersInLobby = [];
 let gameInProgress = false;
 let isDrawing = false;       // true while the server is dealing cards to this player
 let matchEverStarted = false;
+let isWaitlisted = false;    // true while waiting for a seat because the game is full
 
 const sidePanel = document.getElementById('side-panel');
 const collapseButton = document.getElementById('collapse-btn');
@@ -208,6 +209,7 @@ socket.on('updateOptions', function(options) {
 });
 
 socket.on('gameStarted', function(playerList) {
+    if (isWaitlisted) return;
     players = playerList.length;
     hide('waitingOverlay');
     gameInProgress = true;
@@ -233,6 +235,20 @@ socket.on('pendingJoin', function() {
     const overlay = document.getElementById('waitingOverlay');
     overlay.textContent = 'A hand is in progress — you will join at the start of the next hand';
     overlay.style.display = 'flex';
+});
+
+// The game is full: show a waiting screen until a seat opens up
+socket.on('roomFull', function({ position, maxPlayers }) {
+    isWaitlisted = true;
+    const overlay = document.getElementById('waitingOverlay');
+    overlay.textContent = `The game is full (${maxPlayers} players max). You're #${position} in line and will be seated at the start of the next hand once a spot opens up.`;
+    overlay.style.display = 'flex';
+});
+
+// A seat opened up for us
+socket.on('roomJoined', function() {
+    isWaitlisted = false;
+    document.getElementById('waitingOverlay').textContent = 'Waiting for the host to start the game';
 });
 
 // Show or hide the waiting overlay for non-host players
@@ -345,8 +361,14 @@ socket.on('gameStatus', function({ cardsToDraw, playDirection }) {
 function updatePileVisuals({ deckCount, discardCount }) {
     const pile = document.querySelector('.playArea1 .pile');
     const discardArea = document.querySelector('.playArea2');
-    if (pile) pile.dataset.count = Math.min(deckCount, 4);
-    if (discardArea) discardArea.dataset.count = Math.min(discardCount, 3);
+    if (pile) {
+        pile.dataset.count = Math.min(deckCount, 4);
+        pile.title = `${deckCount} ${deckCount === 1 ? 'card' : 'cards'} left in draw pile`;
+    }
+    if (discardArea) {
+        discardArea.dataset.count = Math.min(discardCount, 3);
+        discardArea.title = `${discardCount} ${discardCount === 1 ? 'card' : 'cards'} in discard pile`;
+    }
 }
 
 socket.on('pileStatus', updatePileVisuals);
