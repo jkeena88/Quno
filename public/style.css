@@ -187,6 +187,10 @@ body {
     overflow: hidden;
 }
 
+/* Host only: clicking an opponent's name offers to boot them */
+body.is-host .playerOpponent .name { cursor: pointer; }
+body.is-host .playerOpponent .name:hover { text-decoration: underline; }
+
 /* ── Layout ── */
 
 .game-content {

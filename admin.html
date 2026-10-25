@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Quno Admin</title>
+<style>
+    :root { --bg:#0e0f11; --panel:#16181c; --line:#2a2d33; --text:#e8e6e2; --muted:#9a9894;
+            --accent:#3b82f6; --good:#3db87a; --bad:#c94f5f; }
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    body { margin: 0; font: 14px/1.45 system-ui, sans-serif; background: var(--bg); color: var(--text); }
+    h1 { font-size: 16px; margin: 0; letter-spacing: .08em; text-transform: uppercase; }
+    h2 { font-size: 11px; margin: 0 0 10px; color: var(--muted); letter-spacing: .08em; text-transform: uppercase; }
+    button, input, select { font: inherit; color: inherit; background: #1e2128; border: 1px solid var(--line);
+                            border-radius: 6px; padding: 6px 12px; }
+    button { cursor: pointer; }
+    button:hover { border-color: var(--accent); }
+    button.danger:hover { border-color: var(--bad); color: var(--bad); }
+    input[type=number] { width: 70px; }
+    .muted { color: var(--muted); }
+
+    #login { max-width: 320px; margin: 18vh auto; padding: 24px; background: var(--panel);
+             border: 1px solid var(--line); border-radius: 12px; display: flex; flex-direction: column; gap: 12px; }
+    #loginErr { color: var(--bad); margin: 0; min-height: 1.4em; }
+
+    header { display: flex; align-items: center; gap: 12px; padding: 12px 20px; background: #0a0b0d;
+             border-bottom: 1px solid var(--line); }
+    header .spacer { flex: 1; }
+    .pill { padding: 2px 10px; border-radius: 999px; font-size: 12px; background: #14532d; }
+    .pill.off { background: #7f1d1d; }
+    main { max-width: 1000px; margin: 0 auto; padding: 16px; display: grid; gap: 14px; }
+    .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+    .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .bar + .bar { margin-top: 10px; }
+    #game { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; }
+
+    .row { padding: 10px; border: 1px solid var(--line); border-radius: 8px; margin-bottom: 8px; cursor: pointer; }
+    .row:hover { border-color: #444; }
+    .row.selected { border-color: var(--accent); background: #1a2233; }
+    .head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 6px; }
+    .tag { padding: 0 8px; border-radius: 999px; font-size: 11px; background: #2a2d33; }
+    .tag.turn { background: #14532d; }
+    .tag.off { background: #7f1d1d; }
+    .hand { display: flex; flex-wrap: wrap; gap: 4px; }
+    .chip { display: inline-block; min-width: 30px; padding: 2px 6px; text-align: center; border-radius: 6px;
+            font-weight: 700; border: 1px solid rgba(255,255,255,.25); }
+    .chip.removable { cursor: pointer; }
+    .chip.removable:hover { outline: 2px solid var(--bad); }
+    .opts { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 6px 14px; margin-bottom: 10px; }
+    .opts label { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+    #eventLog { max-height: 260px; overflow-y: auto; font: 12px/1.5 ui-monospace, Consolas, monospace; }
+    #eventLog div { padding: 2px 0; border-bottom: 1px solid var(--line); }
+    #eventLog .time { color: var(--muted); margin-right: 8px; }
+    #eventLog .admin { color: #93c5fd; }
+    #toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); padding: 8px 16px;
+             border-radius: 8px; opacity: 0; transition: opacity .2s; pointer-events: none; }
+    #toast.show { opacity: 1; }
+    #toast.good { background: #14532d; }
+    #toast.bad { background: #7f1d1d; }
+</style>
+</head>
+<body>
+
+<div id="login">
+    <h1>Quno Admin</h1>
+    <input type="password" id="pw" placeholder="Password" autocomplete="current-password">
+    <button id="loginBtn">Sign in</button>
+    <p id="loginErr"></p>
+</div>
+
+<div id="app" hidden>
+    <header>
+        <h1>Quno Admin</h1>
+        <span id="conn" class="pill">Connected</span>
+        <span class="spacer"></span>
+        <button id="copyState">Copy state JSON</button>
+    </header>
+
+    <main>
+        <section class="panel">
+            <h2>Game</h2>
+            <div id="game"></div>
+        </section>
+
+        <section class="panel">
+            <h2>Game controls</h2>
+            <div class="bar">
+                <button id="newMatchBtn" class="danger">Start new match</button>
+                <button id="newHandBtn" class="danger">Deal new hand</button>
+                <button id="nextTurnBtn" class="danger">Force next turn (clears draw stack)</button>
+                <button id="refreshAllBtn" class="danger">Refresh everyone's page</button>
+            </div>
+            <div class="bar">
+                <input type="text" id="msgText" placeholder="Message for the game log" maxlength="200" style="flex:1;min-width:200px">
+                <button id="msgBtn">Send to log</button>
+            </div>
+        </section>
+
+        <section class="panel">
+            <h2>Game options</h2>
+            <div class="opts" id="opts"></div>
+            <button id="optsBtn">Apply options</button>
+        </section>
+
+        <section class="panel">
+            <h2>Selected player: <span id="selName" style="color:var(--text)">(click a player below)</span></h2>
+            <div class="bar">
+                <button id="hostBtn">Make host</button>
+                <button id="refreshBtn">Refresh page</button>
+                <button id="bootBtn" class="danger">Boot</button>
+            </div>
+            <div class="bar">
+                <input type="number" id="drawCount" value="2" min="1" max="50">
+                <button id="drawBtn">Make them draw</button>
+                <select id="cardSel"></select>
+                <button id="giveBtn">Give this card</button>
+            </div>
+            <div class="bar">
+                <select id="scoreField">
+                    <option value="points">Points</option>
+                    <option value="handsWon">Hands won</option>
+                </select>
+                <input type="number" id="scoreVal" value="0">
+                <button id="scoreSetBtn">Set to value</button>
+                <button id="scoreAddBtn">Add value</button>
+            </div>
+        </section>
+
+        <section class="panel">
+            <h2>Players in this hand <span class="muted">(click a card to remove it)</span></h2>
+            <div id="players"></div>
+        </section>
+
+        <section class="panel">
+            <h2>Connected, not in this hand</h2>
+            <div id="waiting"></div>
+        </section>
+
+        <section class="panel">
+            <h2>Event log</h2>
+            <div id="eventLog"></div>
+        </section>
+    </main>
+</div>
+
+<div id="toast"></div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+const COLORS  = { red: '#e8342a', yellow: '#FFAA01', green: '#3a9e3a', blue: '#4545ff', black: '#222' };
+const SYMBOLS = { skip: '⊘', reverse: '⇄', draw2: '+2', wild: 'W', draw4: '+4' };
+
+let socket = null;
+let selected = null;   // name of the selected player
+let lastState = null;
+let lastSig = '';      // skip re-rendering when nothing changed, so clicks aren't lost
+let toastTimer;
+
+// ── Login / connection ──
+
+function showLogin(msg) {
+    $('app').hidden = true;
+    $('login').hidden = false;
+    $('loginErr').textContent = msg || '';
+    $('pw').focus();
+}
+
+function setConn(connected) {
+    $('conn').textContent = connected ? 'Connected' : 'Reconnecting…';
+    $('conn').classList.toggle('off', !connected);
+}
+
+function signIn(password) {
+    if (socket) socket.disconnect();
+    lastSig = '';
+    socket = io('/admin', { auth: { password } });
+
+    socket.on('connect', () => {
+        try { sessionStorage.setItem('qunoAdminPw', password); } catch (e) {}
+        $('login').hidden = true;
+        $('app').hidden = false;
+        setConn(true);
+    });
+    socket.on('connect_error', err => {
+        // Only bounce to the login screen for auth failures; network blips just retry
+        if (err.data && err.data.auth) {
+            try { sessionStorage.removeItem('qunoAdminPw'); } catch (e) {}
+            socket.disconnect();
+            showLogin(err.message);
+        } else {
+            setConn(false);
+        }
+    });
+    socket.on('disconnect', () => setConn(false));
+    socket.on('catalog', buildCatalog);
+    socket.on('state', render);
+        socket.on('eventLog', entries => {
+        $('eventLog').innerHTML = entries.slice().reverse().map(logRow).join('');
+    });
+    socket.on('logEvent', entry => {
+        const box = $('eventLog');
+        box.insertAdjacentHTML('afterbegin', logRow(entry));
+        while (box.children.length > MAX_LOG_ROWS) box.lastChild.remove();
+    });
+}
+
+$('loginBtn').onclick = () => signIn($('pw').value);
+$('pw').addEventListener('keydown', e => { if (e.key === 'Enter') signIn($('pw').value); });
+
+// ── Actions ──
+
+function act(type, payload = {}, confirmMsg) {
+    if (confirmMsg && !confirm(confirmMsg)) return;
+    socket.emit('action', type, payload, res => toast(res.msg, res.ok));
+}
+
+function needSelected() {
+    if (!selected) { toast('Click a player first', false); return false; }
+    return true;
+}
+
+$('newMatchBtn').onclick   = () => act('newMatch', {}, 'Start a new match? This resets all scores.');
+$('newHandBtn').onclick    = () => act('newHand', {}, 'Deal a new hand now?');
+$('nextTurnBtn').onclick   = () => act('nextTurn', {}, 'Skip to the next turn and clear any draw stack?');
+$('refreshAllBtn').onclick = () => act('refresh', { name: '*' }, "Reload every player's page?");
+$('msgBtn').onclick        = () => { act('broadcast', { text: $('msgText').value }); $('msgText').value = ''; };
+
+$('hostBtn').onclick    = () => needSelected() && act('setHost', { name: selected });
+$('refreshBtn').onclick = () => needSelected() && act('refresh', { name: selected });
+$('bootBtn').onclick    = () => needSelected() && act('boot', { name: selected }, `Boot ${selected}?`);
+$('drawBtn').onclick    = () => needSelected() && act('draw', { name: selected, count: $('drawCount').value });
+$('giveBtn').onclick    = () => needSelected() && act('giveCard', { name: selected, cardId: $('cardSel').value });
+
+$('copyState').onclick = () => {
+    navigator.clipboard.writeText(JSON.stringify(lastState, null, 2))
+        .then(() => toast('State copied to clipboard', true));
+};
+
+// Click a player row to select them; click a card in their hand to remove it
+document.addEventListener('click', e => {
+    const row = e.target.closest('.row');
+    if (!row) return;
+    selected = row.dataset.name;
+    $('selName').textContent = selected;
+    document.querySelectorAll('.row').forEach(r => r.classList.toggle('selected', r.dataset.name === selected));
+
+    const cardEl = e.target.closest('.chip[data-card]');
+    if (cardEl) {
+        act('removeCard', { name: selected, cardId: cardEl.dataset.card },
+            `Remove this card from ${selected}'s hand? It goes back into the draw pile.`);
+    }
+});
+
+function toast(msg, good) {
+    const t = $('toast');
+    t.textContent = msg;
+    t.className = (good ? 'good' : 'bad') + ' show';
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => t.classList.remove('show'), 3500);
+}
+
+// ── Rendering ──
+
+// Fill the "give card" dropdown from the server's card list so the logic isn't duplicated here
+function buildCatalog(cards) {
+    const sel = $('cardSel');
+    sel.innerHTML = '';
+    const names = ['Red', 'Yellow', 'Green', 'Blue'];
+    for (let row = 0; row < 8; row++) {
+        const group = document.createElement('optgroup');
+        group.label = `${names[row % 4]} · ${row < 4 ? 'set 1 (+ wild)' : 'set 2 (+ draw 4)'}`;
+        cards.slice(row * 14, row * 14 + 14).forEach(c => {
+            const opt = document.createElement('option');
+            opt.value = c.ID;
+            opt.textContent = c.Color === 'black'
+                ? (c.Type === 'draw4' ? 'Wild Draw 4' : 'Wild') + ` (#${c.ID})`
+                : `${c.Color} ${c.Type} (#${c.ID})`;
+            group.appendChild(opt);
+        });
+        sel.appendChild(group);
+    }
+}
+
+function chip(c, removable) {
+    const label = SYMBOLS[c.Type] ?? c.Type;
+    const fg = c.Color === 'yellow' ? '#000' : '#fff';
+    const tip = `${c.Color} ${c.Type} (#${c.ID})${removable ? ' (click to remove)' : ''}`;
+    return `<span class="chip${removable ? ' removable' : ''}"${removable ? ` data-card="${c.ID}"` : ''} style="background:${COLORS[c.Color]};color:${fg}" title="${esc(tip)}">${esc(label)}</span>`;
+}
+
+function render(state) {
+    lastState = state;
+    const sig = JSON.stringify(state);
+    if (sig === lastSig) return;
+    lastSig = sig;
+    syncOptions(state.options);
+    renderGame(state);
+    renderPlayers(state);
+}
+
+function renderGame(s) {
+    const g = s.game;
+    const enabled = Object.keys(s.options).filter(k => s.options[k]);
+    const rows = [
+        ['Host', esc(s.hostName || '—')],
+        ['Turn', esc(g.currentPlayer || '—')],
+        ['Top card', g.topCard ? chip(g.topCard) : '—'],
+        ['Active color / type', `${esc(g.currentColor || '—')} / ${esc(g.currentType ?? '—')}`],
+        ['Direction', g.playDirection === 1 ? 'clockwise (+1)' : 'counter-clockwise (−1)'],
+        ['Draw queue', g.cardsToDraw ? `+${g.cardsToDraw} (${esc(g.stackType)})` : 'none'],
+        ['Required play', g.requiredPlay.length ? esc(g.requiredPlay.join(', ')) : 'none'],
+        ['Draw / discard pile', `${g.deckCount} / ${g.discardCount}`],
+        ['Hands played', g.handsPlayed],
+        ['Hand status', g.gameIsOver ? 'over' : (g.hasMatch ? 'in progress' : 'not started')],
+        ['Pending skip target', esc(g.pendingSkipTarget || '—')],
+        ['Pending win', esc(g.pendingWinner || '—')],
+        ['Options on', enabled.length ? esc(enabled.join(', ')) : 'none'],
+    ];
+    $('game').innerHTML = rows.map(([k, v]) => `<div><span class="muted">${k}</span><br>${v}</div>`).join('');
+}
+
+function renderPlayers(s) {
+    const byColorThenType = (a, b) => a.Color.localeCompare(b.Color) || String(a.Type).localeCompare(String(b.Type));
+
+    $('players').innerHTML = s.players.length ? s.players.map(p => `
+        <div class="row${p.name === selected ? ' selected' : ''}" data-name="${esc(p.name)}">
+            <div class="head">
+                <b>${esc(p.name)}</b>
+                ${p.isHost ? '<span class="tag">👑 host</span>' : ''}
+                ${p.isCurrent ? '<span class="tag turn">▶ turn</span>' : ''}
+                ${p.connected ? '' : '<span class="tag off">offline</span>'}
+                ${p.calledUno ? '<span class="tag">Quno called</span>' : ''}
+                ${p.waitingForColor ? '<span class="tag">choosing color</span>' : ''}
+                <span class="muted">seat ${p.seat} · ${p.points} pts · ${p.handsWon} hands won · ${p.hand.length} cards</span>
+            </div>
+            <div class="hand">${p.hand.slice().sort(byColorThenType).map(c => chip(c, true)).join('') || '<span class="muted">empty hand</span>'}</div>
+        </div>`).join('')
+        : '<p class="muted">No match in progress.</p>';
+
+    $('waiting').innerHTML = s.waiting.length ? s.waiting.map(w => `
+        <div class="row${w.name === selected ? ' selected' : ''}" data-name="${esc(w.name)}">
+            <b>${esc(w.name)}</b> ${w.isHost ? '<span class="tag">👑 host</span>' : ''}
+        </div>`).join('')
+        : '<p class="muted">Nobody.</p>';
+}
+
+// ── Game options ──
+
+const OPTION_LABELS = {
+    playWildDraw4: 'Play Wild Draw 4 any time',
+    stackDraw2: 'Stack Draw 2s', skipDraw2: 'Skip Draw 2s', reverseDraw2: 'Reverse Draw 2s',
+    skipSkip: 'Skip a Skip',
+    stackDraw4: 'Stack Draw 4s', skipDraw4: 'Skip Draw 4s', reverseDraw4: 'Reverse Draw 4s',
+};
+
+$('opts').innerHTML = Object.entries(OPTION_LABELS).map(([key, label]) =>
+    `<label><input type="checkbox" value="${key}">${label}</label>`).join('');
+
+let lastOptionsSig = '';
+// Only overwrite the checkboxes when the server's options actually changed, so
+// edits you're in the middle of making aren't wiped by the refresh
+function syncOptions(options) {
+    const sig = JSON.stringify(options);
+    if (sig === lastOptionsSig) return;
+    lastOptionsSig = sig;
+    document.querySelectorAll('#opts input').forEach(cb => { cb.checked = !!options[cb.value]; });
+}
+
+$('optsBtn').onclick = () => act('setOptions', {
+    options: Array.from(document.querySelectorAll('#opts input:checked')).map(cb => cb.value),
+});
+
+// ── Scores ──
+
+const scorePayload = mode => ({ name: selected, field: $('scoreField').value, mode, value: $('scoreVal').value });
+$('scoreSetBtn').onclick = () => needSelected() && act('adjustScore', scorePayload('set'));
+$('scoreAddBtn').onclick = () => needSelected() && act('adjustScore', scorePayload('add'));
+
+// ── Event log (newest first) ──
+
+const MAX_LOG_ROWS = 300;
+
+function logRow(entry) {
+    const time = new Date(entry.t).toLocaleTimeString([], { hour12: false });
+    const cls = entry.msg.startsWith('[admin]') ? ' class="admin"' : '';
+    return `<div${cls}><span class="time">${time}</span>${esc(entry.msg)}</div>`;
+}
+
+// ── Start: reuse the password for this browser tab so a reload doesn't ask again ──
+
+try {
+    const saved = sessionStorage.getItem('qunoAdminPw');
+    if (saved) signIn(saved);
+} catch (e) {}
+</script>
+</body>
+</html>

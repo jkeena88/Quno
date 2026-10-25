@@ -253,6 +253,13 @@ socket.on('playerLeft', function({ playerId: leftPlayerId }) {
     if (panel) panel.remove();
 });
 
+// The admin removed one of our cards
+socket.on('adminRemoveCard', function(cardId) {
+    const el = document.getElementById('card_' + cardId);
+    if (el) el.remove();
+    repositionCards({ SocketID: socketId, PlayerID: playerId });
+});
+
 // Update the lobby player list when anyone joins or leaves
 socket.on('newPlayer', function(data) {
     const {players: lobbyPlayers, host: hostName} = data;
@@ -1026,6 +1033,20 @@ socket.on('cardDrawn', function() {
     playSound(f);
 });
 
+// ── Admin actions ──
+
+// The admin asked the client to reload
+socket.on('adminRefresh', () => location.reload());
+
+// The admin gave the host role to someone else
+socket.on('demoted', function() {
+    isPlayerA = false;
+    setOptionsEditable(false);
+    hide('options');
+    hide('btnStart');
+    hide('btnDeal');
+});
+
 // ── Persistence ──
 
 function savePlayerName(name) {
@@ -1067,10 +1088,12 @@ function createPlayersUI(players) {
         let div_points = document.createElement('div');
         let div_hands_won = document.createElement('div');
 
-        if(isPlayerA) {
-            div_player_name.style.cursor = 'pointer';
-            div_player_name.addEventListener('click', () => showBootModal(players[i].SocketID, players[i].Name));
-        }
+        // Clicking an opponent's name offers to boot them, but only while this client is the host.
+        // Checked at click time so it stays correct when the host changes mid-game.
+        div_player_name.addEventListener('click', () => {
+            if (!isPlayerA || players[i].SocketID === socketId) return;
+            showBootModal(players[i].Name);
+        });
 
         div_player_name.className = 'name';
         div_points.className = 'points';
@@ -1132,6 +1155,9 @@ function setOptionsEditable(editable) {
     document.getElementById('options').classList.toggle('readonly', !editable);
     document.getElementById('btnSaveOptions').style.display = editable ? '' : 'none';
     document.getElementById('optionsReadOnlyNote').style.display = editable ? 'none' : 'block';
+
+    // Host-only styling hook (clickable opponent names for booting)
+    document.body.classList.toggle('is-host', editable);
 }
 
 function saveOptions() {
