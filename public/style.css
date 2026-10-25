@@ -34,6 +34,9 @@
     --grid-item-bg: #e8e4de;
     --player-active-bg: #fff;
     --player-active-outline: #1a1a1a;
+
+    --stack-edge-a: #c9c4bb;
+    --stack-edge-b: #f5f2ec;
 }
 
 /* ── Dark Mode ── */
@@ -62,6 +65,9 @@
     --grid-item-bg: #1c1f24;
     --player-active-bg: #1e2128;
     --player-active-outline: #c8c4bc;
+
+    --stack-edge-a: #2a2d33;
+    --stack-edge-b: #8a8780;
 }
 
 [data-theme="dark"] body {
@@ -361,6 +367,93 @@ main #status {
     overflow: visible;
 }
 
+/* ── Stacked-pile look ── */
+
+/* Draw pile: alternating light/dark 1px layers read as the edges of a thick deck */
+.playArea1 .pile {
+    box-shadow:
+        1px 1px 0 var(--stack-edge-a),
+        2px 2px 0 var(--stack-edge-b),
+        3px 3px 0 var(--stack-edge-a),
+        4px 4px 0 var(--stack-edge-b),
+        5px 5px 0 var(--stack-edge-a),
+        6px 6px 0 var(--stack-edge-b),
+        7px 7px 0 var(--stack-edge-a),
+        8px 9px 8px rgba(0, 0, 0, 0.3);
+}
+
+/* Discard pile: two slightly rotated cards peek out from under the top card.
+   They only appear once a discard card exists (the top card carries dataCardColor). */
+.playArea2::before,
+.playArea2::after {
+    content: '';
+    display: none;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: var(--pile-card-width);
+    height: var(--pile-card-height);
+    border-radius: 13px;
+    background: var(--stack-edge-b);
+    border: 1px solid var(--stack-edge-a);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+    pointer-events: none;
+}
+
+.playArea2::before {
+    transform: translate(-50%, -50%) rotate(-5deg);
+    z-index: 0;
+}
+
+.playArea2::after {
+    transform: translate(-50%, -50%) rotate(3deg);
+    z-index: 1;
+}
+
+/* Draw pile: fewer layers as the deck runs down (4+ = the default above) */
+.playArea1 .pile[data-count="3"] {
+    box-shadow:
+        1px 1px 0 var(--stack-edge-a),
+        2px 2px 0 var(--stack-edge-b),
+        3px 3px 0 var(--stack-edge-a),
+        4px 4px 0 var(--stack-edge-b),
+        5px 5px 0 var(--stack-edge-a),
+        6px 7px 7px rgba(0, 0, 0, 0.3);
+}
+
+.playArea1 .pile[data-count="2"] {
+    box-shadow:
+        1px 1px 0 var(--stack-edge-a),
+        2px 2px 0 var(--stack-edge-b),
+        3px 3px 0 var(--stack-edge-a),
+        4px 5px 6px rgba(0, 0, 0, 0.3);
+}
+
+.playArea1 .pile[data-count="1"] {
+    box-shadow:
+        1px 1px 0 var(--stack-edge-a),
+        2px 3px 4px rgba(0, 0, 0, 0.3);
+}
+
+/* Empty deck: card back disappears, leaving a dashed outline */
+.playArea1 .pile[data-count="0"] {
+    background-image: none;
+    box-shadow: none;
+    border: 2px dashed var(--border-medium);
+}
+
+/* Discard pile: first card lies flat; background cards appear as discards accumulate */
+.playArea2[data-count="2"]::before,
+.playArea2[data-count="3"]::before,
+.playArea2[data-count="3"]::after {
+    display: block;
+}
+
+/* Soft shadow under the top discard so it sits above the cards beneath */
+#discard[dataCardColor] {
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+}
+
 #player4 { grid-column: 8 / span 2; grid-row: 2; }
 #player5 { grid-column: 1 / span 2; grid-row: 3; }
 #player6 { grid-column: 8 / span 2; grid-row: 3; }
@@ -505,6 +598,23 @@ main .card:first-child { margin-left: 0; }
 
 /* Opponent starting overlap — JS repositionCards overrides this dynamically */
 .playerOpponent .card { margin-left: -70px; }
+
+/* Hovering a card in your own hand lifts it. The invisible ::after extends the
+   card's hit area downward to cover the gap the lift leaves, so the pointer
+   stays "on" the card instead of flickering in and out. */
+.playerSelf .card:not(.unplayable):hover {
+    transform: scale(0.6) translateY(-50px);
+    z-index: 5;
+}
+
+.playerSelf .card:not(.unplayable):hover::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 100%;
+    height: 60px;
+}
 
 main .player .hand {
     display: flex;
@@ -916,4 +1026,25 @@ hr {
 
 .config-container {
     padding-bottom: 10px;
+}
+
+/* Read-only options (non-host) */
+.options-note {
+    display: none;
+    margin: 0 0 8px;
+    font-size: 12.5px;
+    color: var(--text-muted);
+}
+
+#options.readonly #left-options label {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+#options.readonly #left-options label:hover {
+    color: var(--text-secondary);
+}
+
+#options.readonly #left-options input[type="checkbox"] {
+    cursor: not-allowed;
 }

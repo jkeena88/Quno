@@ -45,6 +45,7 @@ let handsPlayed = 0;
 let matchCardsPlayed = 0;
 let handCardsPlayed = 0;
 let turnStartTime = null;
+let lastHandSummary = null; // stats snapshot from the most recently completed hand
 
 // ── Options (all off by default) ──
 let playWildDraw4 = false;  // allow Wild Draw 4 regardless of hand contents
@@ -134,6 +135,7 @@ function onConnection(socket) {
                 io.to(nextSocket.id).emit('updateOptions', { playWildDraw4, stackDraw2, skipDraw2, reverseDraw2, skipSkip, stackDraw4, skipDraw4, reverseDraw4 });
                 io.emit('setHost', hostName);
                 io.emit('newPlayer', { players: playersInLobby, host: hostName });
+                io.emit('logMessage', hostName + ' is now the host');
             }
         }
 
@@ -220,30 +222,37 @@ function onConnection(socket) {
                 stackType: stackType,
                 cardsToDraw: cardsToDraw,
                 playDirection: playDirection,
+                deckCount: deck.length,
+                discardCount: discardPile.length,
                 isHost: socket.id === playerA,
                 hostName: hostName,
                 playersInLobby: playersInLobby,
                 playWildDraw4
             });
+            if (gameIsOver) {
+                io.to(socket.id).emit('revealHands', revealPayload());
+            }
             io.emit('newPlayer', { players: playersInLobby, host: hostName });
             io.emit('logMessage', playerName + ' rejoined the game');
+            io.to(socket.id).emit('updateOptions', { playWildDraw4, stackDraw2, skipDraw2, reverseDraw2, skipSkip, stackDraw4, skipDraw4, reverseDraw4 });
             if (socket.id === playerA) {
                 io.to(socket.id).emit('isPlayerA', { gameInProgress: !gameIsOver });
-                io.to(socket.id).emit('updateOptions', { playWildDraw4, stackDraw2, skipDraw2, reverseDraw2, skipSkip, stackDraw4, skipDraw4, reverseDraw4 });
                 io.emit('setHost', hostName);
             }
             return;
         }
 
         // First player to join becomes the host
+        let becameHost = false;
         if(playerA == null) {
             playerA = socket.id;
             hostName = playerName;
+            becameHost = true;
             io.to(socket.id).emit('isPlayerA');
             io.emit('setHost', hostName);
         }
 
-        io.to(socket.id).emit('updateOptions', {playWildDraw4});
+        io.to(socket.id).emit('updateOptions', { playWildDraw4, stackDraw2, skipDraw2, reverseDraw2, skipSkip, stackDraw4, skipDraw4, reverseDraw4 });
 
         let people;
         try {
@@ -260,6 +269,9 @@ function onConnection(socket) {
             io.to(socket.id).emit('responseRoom', [people + 1, maxPlayers]);
             io.emit('newPlayer', {players: playersInLobby, host: hostName});
             io.emit('logMessage', playerName + ' joined the game');
+            if (becameHost) {
+                io.emit('logMessage', playerName + ' is now the host');
+            }
 
             // If a hand is currently in progress, hold this player in a pending queue
             // rather than adding them to the active game — they'll join at the next hand.
@@ -284,6 +296,7 @@ function onConnection(socket) {
         handsPlayed = 0;
         matchCardsPlayed = 0;
         pendingPlayers = [];
+        lastHandSummary = null;
 
         if(playerCount > 1) {
             io.emit('logMessage', 'A new match was started');
@@ -503,7 +516,7 @@ function onConnection(socket) {
         // Valid call: it's their turn with ≤2 cards, or they're down to 1 card on any turn
         if((player.Hand.length <= 2 && socket.id == currentPlayer) || player.Hand.length == 1) {
             if (!player.HasCalledUno) {
-                io.emit('logMessage', socket.playerName + ' called Uno');
+                io.emit('logMessage', socket.playerName + ' called Quno');
                 player.HasCalledUno = true;
             }
         } else {
@@ -511,7 +524,7 @@ function onConnection(socket) {
             const recentlyGotUnoYou = player.LastUnoYouTime && (now - player.LastUnoYouTime < GRACE_MS);
 
             if (!recentlyGotUnoYou) {
-                io.emit('logMessage', socket.playerName + ' called Uno at the wrong time - oops!');
+                io.emit('logMessage', socket.playerName + ' called Quno at the wrong time - oops!');
                 drawCards(socket.id, 2);
                 io.to(socket.id).emit('calledUnoMe');
             }
@@ -533,19 +546,26 @@ function onConnection(socket) {
         const GRACE_MS = 1000;
 
         players.forEach((player) => {
+            if (player.SocketID === socket.id) return; // can't call Quno on yourself
             const recentlyCalledUnoMe = player.LastUnoMeTime && (now - player.LastUnoMeTime < GRACE_MS);
 
             // Catch any player who has 1 card and hasn't called Uno (and didn't just call it)
             if(player.Hand.length == 1 && !player.HasCalledUno && !recentlyCalledUnoMe) {
-                io.emit('logMessage', player.Name + ' had Uno called on them by ' + caller.Name);
+                io.emit('logMessage', socket.playerName + ' called Quno at the wrong time - oops!');
                 drawCards(player.SocketID, 4);
                 player.LastUnoYouTime = Date.now();
             };
         });
     });
 
+    // Send the last completed-hand stats snapshot to whoever asks for it
+    socket.on('requestStats', function() {
+        socket.emit('statsData', lastHandSummary);
+    });
+
     // Save updated game options sent by the host
     socket.on('saveOptions', (data) => {
+        if (socket.id !== playerA) return; // host only
         let selectedOptions = data.options;
 
         playWildDraw4 = selectedOptions.includes('playWildDraw4');
@@ -654,6 +674,7 @@ function performDraw(player) {
     io.emit('renderOpponentCard', player.PlayerID);
 
     io.emit('cardDrawn');
+    emitPileStatus();
 }
 
 // ── Stacking helpers ──────────────────────────────────────────────────────────
@@ -751,6 +772,16 @@ function emitGameStatus() {
     io.emit('gameStatus', { cardsToDraw, playDirection });
 }
 
+// Tell all clients how tall each pile is so they can draw the right number of layers
+function emitPileStatus() {
+    io.emit('pileStatus', { deckCount: deck.length, discardCount: discardPile.length });
+}
+
+// Everyone's remaining cards, sent at the end of a hand so players can see what was left
+function revealPayload() {
+    return Array.from(players.values()).map(p => ({ PlayerID: p.PlayerID, Hand: p.Hand }));
+}
+
 // Draw a fixed number of cards for a player, with a staggered delay between each
 function drawCards(SocketID, num) {
     if (num <= 0) return Promise.resolve();
@@ -789,12 +820,19 @@ function autoDraw(SocketID) {
     if (!player) return Promise.resolve();
 
     return new Promise((resolve) => {
+        let drawn = 0; // cards drawn in this sequence
+
         const tryDraw = () => {
             if (!canPlay(SocketID, ['none'])) {
                 performDraw(player);
-                io.emit('logMessage', `${player.Name} drew 1 card`);
+                drawn++;
                 setTimeout(tryDraw, CARD_DRAW_DELAY_MS);
             } else {
+                // Log once, after the player has found a playable card
+                if (drawn > 0) {
+                    io.emit('logMessage', `${player.Name} drew ${drawn} ${drawn === 1 ? 'card' : 'cards'}`);
+                }
+
                 player.HasCalledUno = false;
                 io.to(SocketID).emit('notCalledUnoMe');
                 // Charge the draw time to this player's turn
@@ -831,8 +869,11 @@ function checkForWin(SocketID) {
         summary.handCardsPlayed = handCardsPlayed;
         summary.matchCardsPlayed = matchCardsPlayed;
 
+        lastHandSummary = summary; // keep for on-demand viewing
+
         gameIsOver = true;
         io.emit('turnChange', -1);
+        io.emit('revealHands', revealPayload());
         io.emit('handSummary', summary);
         io.emit('gameOver', winner.Name);
         io.emit('logMessage', winner.Name + ' won the game');
@@ -858,6 +899,7 @@ function discardCard(card, SocketID) {
     if (SocketID !== -1) {
         io.emit('removeOpponentCard', player.PlayerID);
     }
+    emitPileStatus();
 }
 
 // Clear the required-play list and stack state, and broadcast the update to all clients
