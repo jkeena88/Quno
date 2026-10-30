@@ -109,6 +109,14 @@ function getPoints(playersMap, winner) {
         name: p.Name,
         handCardsPlayed: p.HandCardsPlayed,
         matchCardsPlayed: p.MatchCardsPlayed,
+        handForced: p.HandForced,
+        matchForced: p.MatchForced,
+        handReceived: p.HandReceived,
+        matchReceived: p.MatchReceived,
+        handSearched: p.HandSearched,
+        matchSearched: p.MatchSearched,
+        handSelfOwned: p.HandSelfOwned,
+        matchSelfOwned: p.MatchSelfOwned,
         handTurnTime: Math.round(p.HandTurnTime),
         matchTurnTime: Math.round(p.MatchTurnTime),
         pointsScored: p.Points,
@@ -117,6 +125,37 @@ function getPoints(playersMap, winner) {
     }));
 
     return { pointsThisHand, breakdown, standings, playerStats };
+}
+
+// ── recordDrawStats ───────────────────────────────────────────────────────────
+// Updates the cards-drawn counters when `drawer` draws `num` cards that they didn't
+// choose to draw (a stack payout or a Quno penalty).  Mutates player objects in-place.
+//
+// forcedBy is a list of [playerName, count] pairs naming who put those cards on the
+// table.  Each card the drawer draws lands in exactly one of two buckets:
+//   - SelfOwned: cards the drawer added to their own stack, or a penalty they caused
+//     themselves (selfInflicted — a wrongly timed Quno call)
+//   - Received:  everything else, i.e. cards put there by other players
+// Other players named in forcedBy are credited Forced.
+
+function recordDrawStats(playersMap, drawer, num, forcedBy = [], selfInflicted = false) {
+    let ownCards = selfInflicted ? num : 0;
+
+    forcedBy.forEach(([name, count]) => {
+        if (name === drawer.Name) {
+            ownCards += count;
+            return;
+        }
+        const forcer = Array.from(playersMap.values()).find(p => p.Name === name);
+        if (!forcer) return; // they left the game before the cards were drawn
+        forcer.HandForced += count;
+        forcer.MatchForced += count;
+    });
+
+    drawer.HandReceived += num - ownCards;
+    drawer.MatchReceived += num - ownCards;
+    drawer.HandSelfOwned += ownCards;
+    drawer.MatchSelfOwned += ownCards;
 }
 
 // ── nextPlayerID ──────────────────────────────────────────────────────────────
@@ -192,5 +231,5 @@ module.exports = {
     cardColor, cardType, cardValue, buildCard,
     createDeck, shuffle,
     canPlay, getPoints, nextPlayerID, reshuffleSeats,
-    buildRequiredPlay, computeHandMargin,
+    buildRequiredPlay, computeHandMargin, recordDrawStats,
 };

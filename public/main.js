@@ -1280,12 +1280,20 @@ socket.on('booted', () => {
 
 // ── End-of-hand summary modal ──
 
+// Sort helpers for the summary tables. Kept as plain functions so the tests can mirror them.
+const byTimeThenCards = (cardsKey, timeKey) => (a, b) => (a[timeKey] - b[timeKey]) || (b[cardsKey] - a[cardsKey]);
+const byCardsDrawn = (forcedKey, receivedKey, searchedKey, selfKey) => (a, b) =>
+    ((b[receivedKey] + b[searchedKey] + b[selfKey]) - (a[receivedKey] + a[searchedKey] + a[selfKey])) || (b[forcedKey] - a[forcedKey]);
+
 function renderHandSummary(summary, isReview) {
     const handLabel = isReview ? 'Last hand' : 'This hand';
     const modal = document.getElementById('handSummaryModal');
     const content = document.getElementById('handSummaryContent');
 
     const ps = summary.playerStats || [];
+
+    // Tint the viewer's own row in every table
+    const rowClass = name => name === playerName ? ' class="own-row"' : '';
 
     // Truncate long player names so they don't break table layout
     const MAX_NAME = 12;
@@ -1308,14 +1316,14 @@ function renderHandSummary(summary, isReview) {
         const slowest = Math.max(...avgs);
         const ranked = avgs.length >= 2 && fastest !== slowest;
 
-        return ps.map(p => {
+        return ps.slice().sort(byTimeThenCards(cardsKey, timeKey)).map(p => {
             const a = avg(p);
             let badge = '';
             if (ranked && a !== null) {
                 if (a === fastest) badge = ' <span title="Fastest: lowest average time per card">🐇</span>';
                 else if (a === slowest) badge = ' <span title="Slowest: highest average time per card">🐢</span>';
             }
-            return `<tr>
+            return `<tr${rowClass(p.name)}>
                 <td style="${tdStyle}">${truncate(p.name)}${badge}</td>
                 <td style="${tdRight}">${p[cardsKey]}</td>
                 <td style="${tdRight}">${formatDuration(p[timeKey])}</td>
@@ -1332,7 +1340,7 @@ function renderHandSummary(summary, isReview) {
         .map(p => {
             const netColor = p.netPoints >= 0 ? 'color:#3db87a;font-weight:600;' : 'color:#c94f5f;font-weight:600;';
             const netStr = (p.netPoints >= 0 ? '+' : '') + p.netPoints;
-            return `<tr>
+            return `<tr${rowClass(p.name)}>
                 <td style="${tdStyle}font-weight:600;">${truncate(p.name)}</td>
                 <td style="${tdRight}">${p.pointsScored}</td>
                 <td style="${tdRight}">${p.pointsGivenUp}</td>
@@ -1340,17 +1348,36 @@ function renderHandSummary(summary, isReview) {
             </tr>`;
         }).join('');
 
+    // Cards drawn: most cards drawn (received + searched + self-owned) first, then most forced on others
+    function buildDrawRows(forcedKey, receivedKey, searchedKey, selfKey) {
+        return ps.slice().sort(byCardsDrawn(forcedKey, receivedKey, searchedKey, selfKey)).map(p => `<tr${rowClass(p.name)}>
+                <td style="${tdStyle}">${truncate(p.name)}</td>
+                <td style="${tdRight}">${p[forcedKey]}</td>
+                <td style="${tdRight}">${p[receivedKey]}</td>
+                <td style="${tdRight}">${p[searchedKey]}</td>
+                <td style="${tdRight}">${p[selfKey]}</td>
+            </tr>`).join('');
+    }
+    const handDrawRows = buildDrawRows('handForced', 'handReceived', 'handSearched', 'handSelfOwned');
+    const matchDrawRows = buildDrawRows('matchForced', 'matchReceived', 'matchSearched', 'matchSelfOwned');
+
+    // Column headers for the cards-drawn tables (hover text explains each column)
+    const drawHeader = `<thead><tr>
+                        <th style="${thStyle}">Player</th>
+                        <th style="${thRight}" title="Cards others drew because of your plays or Quno calls">Forced</th>
+                        <th style="${thRight}" title="Cards you drew because of other players">Received</th>
+                        <th style="${thRight}" title="Cards you drew to find a playable card">Searched</th>
+                        <th style="${thRight}" title="Cards you drew because of yourself: your own Quno penalties and stacked cards you ended up drawing">Self-owned</th>
+                    </tr></thead>`;
+
     const sc = 'padding:10px 0 10px;border-bottom:1px solid rgba(0,232,154,0.15);';
     const slabel = 'font-size:11px;color:#6b8a7a;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px;';
     const sval = 'font-size:1.15rem;font-weight:700';
 
-    // Pad the points-given-up table to match the standings row count
-    const breakdownRows = summary.breakdown.length;
-    const standingsCount = ps.length;
-    const paddingRows = Math.max(0, standingsCount - breakdownRows);
-    const breakdownpadding = paddingRows > 0
-        ? `<tr><td colspan="2" style="padding:${paddingRows * 33}px 0 0;"></td></tr>`
-        : '';
+    // Pad the points-given-up table with blank rows (same styling as real rows) so it
+    // matches the standings row count and the tables below line up
+    const paddingRows = Math.max(0, ps.length - summary.breakdown.length);
+    const breakdownpadding = `<tr><td style="${tdStyle}">&nbsp;</td><td style="${tdRight}">&nbsp;</td></tr>`.repeat(paddingRows);
 
     const html = `
         <h2 style="margin:0 0 20px;text-align:center;">Hand Summary</h2>
@@ -1362,7 +1389,7 @@ function renderHandSummary(summary, isReview) {
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:0;margin-bottom:20px;">
                     <div style="${sc}padding-right:12px;"><div style="${slabel}">Winner</div><div style="${sval}color:#3db87a;">${truncate(summary.winner)}</div></div>
                     <div style="${sc}padding-left:12px;"><div style="${slabel}">Points scored</div><div style="${sval}">${summary.pointsThisHand}</div></div>
-                    <div style="${sc}padding-right:12px;"><div style="${slabel}">Duration</div><div style="${sval}">${formatDuration(summary.handDuration)}</div></div>
+                    <div style="${sc}padding-right:12px;border-bottom:none;"><div style="${slabel}">Duration</div><div style="${sval}">${formatDuration(summary.handDuration)}</div></div>
                     <div style="${sc}padding-left:12px;border-bottom:none;"><div style="${slabel}">Cards played</div><div style="${sval}">${summary.handCardsPlayed}</div></div>
                 </div>
 
@@ -1373,7 +1400,7 @@ function renderHandSummary(summary, isReview) {
                         <th style="${thRight}">Points</th>
                     </tr></thead>
                     <tbody>
-                        ${summary.breakdown.map(b => `<tr><td style="${tdStyle}">${truncate(b.name)}</td><td style="${tdRight}">${b.points}</td></tr>`).join('')}
+                        ${summary.breakdown.slice().sort((a, b) => b.points - a.points).map(b => `<tr${rowClass(b.name)}><td style="${tdStyle}">${truncate(b.name)}</td><td style="${tdRight}">${b.points}</td></tr>`).join('')}
                         ${breakdownpadding}
                     </tbody>
                 </table>
@@ -1386,6 +1413,12 @@ function renderHandSummary(summary, isReview) {
                         <th style="${thRight}">Time</th>
                     </tr></thead>
                     <tbody>${handTurnRows}</tbody>
+                </table>
+
+                <p style="${slabel}margin:18px 0 8px;">Cards drawn (${handLabel.toLowerCase()})</p>
+                <table style="width:100%;border-collapse:collapse;">
+                    ${drawHeader}
+                    <tbody>${handDrawRows}</tbody>
                 </table>
             </div>
 
@@ -1417,6 +1450,12 @@ function renderHandSummary(summary, isReview) {
                         <th style="${thRight}">Time</th>
                     </tr></thead>
                     <tbody>${matchTurnRows}</tbody>
+                </table>
+
+                <p style="${slabel}margin:18px 0 8px;">Cards drawn (match total)</p>
+                <table style="width:100%;border-collapse:collapse;">
+                    ${drawHeader}
+                    <tbody>${matchDrawRows}</tbody>
                 </table>
             </div>
         </div>

@@ -944,7 +944,7 @@ hr {
 }
 
 #handSummaryModal .modal-content {
-    width: 720px;
+    width: 920px;
     max-width: 95vw;
     max-height: 88vh;
     overflow-y: auto;
@@ -987,6 +987,11 @@ hr {
     border: none;
     border-top: 1px solid var(--border-subtle);
     margin: 16px 0;
+}
+
+/* The viewer's own row in the summary tables */
+#handSummaryModal .own-row td {
+    background: rgba(59, 130, 246, 0.18);
 }
 
 /* ── Log message theme-aware text ── */

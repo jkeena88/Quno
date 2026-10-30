@@ -10,7 +10,7 @@ const crypto = require('crypto');
 
 const {
     buildCard, createDeck: buildDeck, shuffle,
-    canPlay: canPlayHand, getPoints, nextPlayerID, reshuffleSeats: reshuffleSeatsMap,
+    canPlay: canPlayHand, getPoints, nextPlayerID, reshuffleSeats: reshuffleSeatsMap, recordDrawStats,
 } = require('./Gamelogic');
 
 app.use(express.static(__dirname + '/public', { 'Content-Type': 'application/javascript' }));
@@ -33,6 +33,7 @@ let currentColor;        // active card color
 let currentType;         // active card type (number, skip, etc.)
 let cardsToDraw = 0;     // accumulated cards a player must draw (from stacked draw 2s / draw 4s)
 let stackType = null;    // 'draw2' | 'draw4' | null — which draw type is currently being stacked
+let stackContributions = new Map(); // player name → cards they added to the current draw stack (for "forced" stats)
 let pendingSkipTarget = null; // socket ID of the player who is about to be skipped (null if no skip pending)
 let discardPile = [];
 let players = new Map(); // socket ID → player object
@@ -317,6 +318,7 @@ function onConnection(socket) {
                 } else if(playType == 'draw4') {
                     cardsToDraw += 4;
                     stackType = 'draw4';
+                    stackContributions.set(player.Name, (stackContributions.get(player.Name) || 0) + 4);
                     emitGameStatus();
                     player.WaitingForColorChoice = true;
                     // requiredPlay will be set after color is chosen (in colorChosen handler)
@@ -325,6 +327,7 @@ function onConnection(socket) {
                 } else if(playType == 'draw2') {
                     cardsToDraw += 2;
                     stackType = 'draw2';
+                    stackContributions.set(player.Name, (stackContributions.get(player.Name) || 0) + 2);
                     emitGameStatus();
                     if (players.get(socket.id).Hand.length === 0) {
                         pendingWinnerSocketId = socket.id;
@@ -440,7 +443,7 @@ function onConnection(socket) {
 
             if (!recentlyGotUnoYou) {
                 logEvent(socket.playerName + ' called Quno at the wrong time - oops!');
-                drawCards(socket.id, 2);
+                drawCards(socket.id, 2, { selfInflicted: true });
                 io.to(socket.id).emit('calledUnoMe');
             }
         }
@@ -467,7 +470,7 @@ function onConnection(socket) {
             // Catch any player who has 1 card and hasn't called Uno (and didn't just call it)
             if(player.Hand.length == 1 && !player.HasCalledUno && !recentlyCalledUnoMe) {
                 logEvent(socket.playerName + ' called Quno at the wrong time - oops!');
-                drawCards(player.SocketID, 4);
+                drawCards(player.SocketID, 4, { forcedBy: [[caller.Name, 4]] });
                 player.LastUnoYouTime = Date.now();
             };
         });
@@ -598,6 +601,14 @@ function dealNewHand() {
                 LastUnoYouTime: 0,
                 HandCardsPlayed: 0,
                 MatchCardsPlayed: 0,
+                HandForced: 0,
+                MatchForced: 0,
+                HandReceived: 0,
+                MatchReceived: 0,
+                HandSearched: 0,
+                MatchSearched: 0,
+                HandSelfOwned: 0,
+                MatchSelfOwned: 0,
                 HandTurnTime: 0,
                 MatchTurnTime: 0,
                 PointsGivenUp: 0,
@@ -713,6 +724,14 @@ function createPlayers() {
             LastUnoYouTime: 0,
             HandCardsPlayed: 0,
             MatchCardsPlayed: 0,
+            HandForced: 0,
+            MatchForced: 0,
+            HandReceived: 0,
+            MatchReceived: 0,
+            HandSearched: 0,
+            MatchSearched: 0,
+            HandSelfOwned: 0,
+            MatchSelfOwned: 0,
             HandTurnTime: 0,
             MatchTurnTime: 0,
             PointsGivenUp: 0,
@@ -796,7 +815,7 @@ async function offerStack() {
 
     if (!playerCanStack) {
         // No stack possible — deal the cards now
-        await drawCards(currentPlayer, cardsToDraw);
+        await drawCards(currentPlayer, cardsToDraw, { paysStack: true, forcedBy: Array.from(stackContributions) });
         stackType = null;
         clearRequiredPlay();
         resolvePendingWin();
@@ -865,7 +884,12 @@ function revealPayload() {
 }
 
 // Draw a fixed number of cards for a player, with a staggered delay between each
-function drawCards(SocketID, num) {
+// Options:
+//   paysStack:    these cards are the pending draw stack being paid out, so the stack is cleared.
+//                 Leave false for Quno penalties, which must not wipe a stack that is still pending.
+//   forcedBy:     [[playerName, count], ...] — who gets "forced" credit for these cards
+//   selfInflicted: the drawer caused this penalty themselves (counts as a self-own)
+function drawCards(SocketID, num, { paysStack = false, forcedBy = [], selfInflicted = false } = {}) {
     if (num <= 0) return Promise.resolve();
 
     const player = players.get(SocketID);
@@ -874,9 +898,14 @@ function drawCards(SocketID, num) {
     const label = num === 1 ? ' card' : ' cards';
     logEvent(`${player.Name} drew ${num}${label}`);
 
-    cardsToDraw = 0;
-    stackType = null;
-    emitGameStatus();
+    recordDrawStats(players, player, num, forcedBy, selfInflicted);
+
+    if (paysStack) {
+        cardsToDraw = 0;
+        stackType = null;
+        stackContributions.clear();
+        emitGameStatus();
+    }
 
     io.to(SocketID).emit('notCalledUnoMe');
 
@@ -912,6 +941,8 @@ function autoDraw(SocketID) {
             } else {
                 // Log once, after the player has found a playable card
                 if (drawn > 0) {
+                    player.HandSearched += drawn;
+                    player.MatchSearched += drawn;
                     logEvent(`${player.Name} drew ${drawn} ${drawn === 1 ? 'card' : 'cards'}`);
                 }
 
@@ -1044,6 +1075,7 @@ async function startGame() {
     playDirection = -1;
     cardsToDraw = 0;
     stackType = null;
+    stackContributions.clear();
     pendingSkipTarget = null;
     pendingWinnerSocketId = null;
     handStartTime = Date.now();
@@ -1068,6 +1100,10 @@ async function startGame() {
         player.LastUnoYouTime = 0;
         player.WaitingForColorChoice = false;
         player.HandCardsPlayed = 0;
+        player.HandForced = 0;
+        player.HandReceived = 0;
+        player.HandSearched = 0;
+        player.HandSelfOwned = 0;
         player.HandTurnTime = 0;
         if(player.PlayerID == currentPlayerID) {
             currentPlayer = player.SocketID;
@@ -1317,6 +1353,7 @@ function runAdminAction(type, p) {
             if (gameIsOver) return ok('A pending win was resolved; the hand is over');
             // Throw away any half-resolved effect, then advance
             cardsToDraw = 0;
+            stackContributions.clear();
             pendingSkipTarget = null;
             players.forEach(pl => { pl.WaitingForColorChoice = false; });
             emitGameStatus();
