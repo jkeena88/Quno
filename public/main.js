@@ -19,6 +19,7 @@ let playersInLobby = [];
 let gameInProgress = false;
 let isDrawing = false;       // true while the server is dealing cards to this player
 let matchEverStarted = false;
+let isWaitlisted = false;    // true while waiting for a seat because the game is full
 
 const sidePanel = document.getElementById('side-panel');
 const collapseButton = document.getElementById('collapse-btn');
@@ -69,6 +70,7 @@ collapseButton.addEventListener('click', () => {
 
 socket.on('connect', function() {
     socketId = socket.id;
+    show('btnOptions', 'inline-block');
     socket.emit('requestJoin', playerName);
 });
 
@@ -77,9 +79,11 @@ socket.on('rejoinState', function(state) {
     socketId = state.mySocketId;
     gameInProgress = !state.gameIsOver;
     isPlayerA = state.isHost;
+    setOptionsEditable(isPlayerA);
     currentColor = state.currentColor;
     requiredPlay = state.requiredPlay || [];
     updateDirectionIndicator(state.cardsToDraw || 0, state.playDirection || -1);
+    updatePileVisuals({ deckCount: state.deckCount, discardCount: state.discardCount });
 
     for (let p of state.playerList) {
         if (p.SocketID === socketId) {
@@ -91,6 +95,7 @@ socket.on('rejoinState', function(state) {
     hide('waitingOverlay');
     hide('status');
     show('uno-buttons', 'flex');
+    show('btnStats', 'inline-block');
     show('discard', 'inline-block');
     hide('color-buttons');
 
@@ -150,6 +155,7 @@ socket.on('setHost', function(name) {
 // Show host controls when this player becomes the host
 socket.on('isPlayerA', function(data) {
     isPlayerA = true;
+    setOptionsEditable(true);
     hide('waitingOverlay');
     show('btnStart', 'inline-block');
     show('btnOptions', 'inline-block');
@@ -203,6 +209,7 @@ socket.on('updateOptions', function(options) {
 });
 
 socket.on('gameStarted', function(playerList) {
+    if (isWaitlisted) return;
     players = playerList.length;
     hide('waitingOverlay');
     gameInProgress = true;
@@ -213,6 +220,7 @@ socket.on('gameStarted', function(playerList) {
     hide('status');
     hide('btnDeal');
     show('uno-buttons', 'flex');
+    show('btnStats', 'inline-block');
     show('discard', 'inline-block');
     hide('color-buttons');
 
@@ -227,6 +235,20 @@ socket.on('pendingJoin', function() {
     const overlay = document.getElementById('waitingOverlay');
     overlay.textContent = 'A hand is in progress — you will join at the start of the next hand';
     overlay.style.display = 'flex';
+});
+
+// The game is full: show a waiting screen until a seat opens up
+socket.on('roomFull', function({ position, maxPlayers }) {
+    isWaitlisted = true;
+    const overlay = document.getElementById('waitingOverlay');
+    overlay.textContent = `The game is full (${maxPlayers} players max). You're #${position} in line and will be seated at the start of the next hand once a spot opens up.`;
+    overlay.style.display = 'flex';
+});
+
+// A seat opened up for us
+socket.on('roomJoined', function() {
+    isWaitlisted = false;
+    document.getElementById('waitingOverlay').textContent = 'Waiting for the host to start the game';
 });
 
 // Show or hide the waiting overlay for non-host players
@@ -245,6 +267,13 @@ function updateWaitingOverlay() {
 socket.on('playerLeft', function({ playerId: leftPlayerId }) {
     const panel = document.getElementById('player_' + leftPlayerId);
     if (panel) panel.remove();
+});
+
+// The admin removed one of our cards
+socket.on('adminRemoveCard', function(cardId) {
+    const el = document.getElementById('card_' + cardId);
+    if (el) el.remove();
+    repositionCards({ SocketID: socketId, PlayerID: playerId });
 });
 
 // Update the lobby player list when anyone joins or leaves
@@ -326,6 +355,23 @@ function updateDirectionIndicator(cardsToDraw, playDirection) {
 socket.on('gameStatus', function({ cardsToDraw, playDirection }) {
     updateDirectionIndicator(cardsToDraw, playDirection);
 });
+
+// ── Pile heights ──
+// Draw pile shows up to 4 layers, discard pile up to 3 (top card + 2 beneath)
+function updatePileVisuals({ deckCount, discardCount }) {
+    const pile = document.querySelector('.playArea1 .pile');
+    const discardArea = document.querySelector('.playArea2');
+    if (pile) {
+        pile.dataset.count = Math.min(deckCount, 4);
+        pile.title = `${deckCount} ${deckCount === 1 ? 'card' : 'cards'} left in draw pile`;
+    }
+    if (discardArea) {
+        discardArea.dataset.count = Math.min(discardCount, 3);
+        discardArea.title = `${discardCount} ${discardCount === 1 ? 'card' : 'cards'} in discard pile`;
+    }
+}
+
+socket.on('pileStatus', updatePileVisuals);
 
 socket.on('turnChange', function(PlayerID) {
     document.querySelectorAll('.player').forEach(p => p.classList.remove('active'));
@@ -410,6 +456,7 @@ socket.on('renderOpponentCard', function(playerID) {
     if (!hand) return;
 
     animateCardDraw(hand, false, () => {
+        if (hand.dataset.revealed) return; // hand was already revealed; the real cards are on screen
         const cardObj = getCardUI({}, { SocketID: null });
         cardObj.style.opacity = '0';
         cardObj.style.transition = 'opacity 0.15s ease';
@@ -430,6 +477,24 @@ socket.on('removeOpponentCard', function(playerID) {
     if (lastCard) lastCard.remove();
 
     repositionCards({ SocketID: null, PlayerID: playerID });
+});
+
+// At the end of a hand, show opponents' remaining cards face-up
+socket.on('revealHands', function(hands) {
+    hands.forEach(({ PlayerID, Hand }) => {
+        if (PlayerID == playerId) return; // our own hand is already face-up
+        const hand = document.getElementById('hand_' + PlayerID);
+        if (!hand) return;
+
+        hand.innerHTML = '';
+        hand.dataset.revealed = 'true';
+
+        Hand.slice()
+            .sort((a, b) => (a.Color.localeCompare(b.Color)) || String(a.Type).localeCompare(String(b.Type)))
+            .forEach(card => hand.appendChild(getCardUI(card)));
+
+        repositionCards({ SocketID: null, PlayerID });
+    });
 });
 
 // Lock all cards while the server is dealing this player their draw
@@ -613,21 +678,12 @@ function animateCardPlay(sourceEl, srcRect) {
     // original element throughout the flight — no sprite drift possible.
     // The source card has backgroundSize/position scaled for 107px cells;
     // rescale back to native cdWidth cells for this 120x180 flying div.
-    const nativeScale = cdWidth / 107; // ~1.121
-    const srcBgSize = sourceEl.style.backgroundSize || 'auto';
-    let flyingBgSize = srcBgSize;
-    let flyingBgPos  = sourceEl.style.backgroundPosition;
-    if (srcBgSize !== 'auto' && srcBgSize !== '' && srcBgSize !== '100%') {
-        const [sw, sh] = srcBgSize.replace(/px/g, '').split(' ').map(Number);
-        const [px, py] = sourceEl.style.backgroundPosition.replace(/px/g, '').split(' ').map(Number);
-        flyingBgSize = `${Math.round(sw * nativeScale)}px ${Math.round(sh * nativeScale)}px`;
-        flyingBgPos  = `${Math.round(px * nativeScale)}px ${Math.round(py * nativeScale)}px`;
-    }
     const flying = document.createElement('div');
     flying.className = 'card';
     flying.style.backgroundImage = sourceEl.style.backgroundImage;
-    flying.style.backgroundPosition = flyingBgPos;
-    flying.style.backgroundSize = flyingBgSize;
+    flying.style.backgroundPosition = sourceEl.style.backgroundPosition;
+    flying.style.backgroundSize = sourceEl.style.backgroundSize;
+    flying.style.backgroundRepeat = 'no-repeat';
     flying.style.position = 'fixed';
     flying.style.width = cdWidth + 'px';
     flying.style.height = cdHeight + 'px';
@@ -733,17 +789,15 @@ function getCardUI(card, player) {
         cardObj.setAttribute('dataCardColor', card.Color);
         cardObj.setAttribute('dataCardType', card.Type);
 
-        // Position the correct sprite from the sheet.
-        // Scale the sheet so each cell matches --card-width (107px).
-        // Native cell size: cdWidth × cdHeight (120 × 180). Scale = 107/120.
-        const spriteScale = 107 / 120;
-        const sheetW = Math.round(1688 * spriteScale); // ~1505
-        const sheetH = Math.round(1446 * spriteScale); // ~1289
-        const offsetX = Math.round((2 + 1680 - cdWidth * (card.ID % 14)) * spriteScale);
-        const offsetY = Math.round((1440 - cdHeight * Math.floor(card.ID / 14)) * spriteScale);
+        // Position the correct sprite from the sheet. The sheet is 14 columns x 8 rows,
+        // so sizing it to 1400% x 800% makes each cell exactly one card, and percentage
+        // positions land on cell boundaries at any card size.
+        const col = card.ID % 14;
+        const row = Math.floor(card.ID / 14);
         cardObj.style.backgroundImage = 'url(' + cards.src + ')';
-        cardObj.style.backgroundSize = `${sheetW}px ${sheetH}px`;
-        cardObj.style.backgroundPosition = `${offsetX}px ${offsetY}px`;
+        cardObj.style.backgroundSize = '1400% 800%';
+        cardObj.style.backgroundPosition = `${col * 100 / 13}% ${row * 100 / 7}%`;
+        cardObj.style.backgroundRepeat = 'no-repeat';
 
         // Colorblind accessibility pattern overlay
         cardObj.style.position = 'relative';
@@ -752,14 +806,6 @@ function getCardUI(card, player) {
 
         if(player != null) {
             cardObj.addEventListener('click', () => playCard(card, player));
-
-            cardObj.addEventListener('mouseenter', function () {
-                cardObj.style.transform = 'scale(0.6) translateY(-50px)';
-            });
-
-            cardObj.addEventListener('mouseleave', function () {
-                cardObj.style.transform = 'scale(0.6) translateY(0)';
-            });
         }
     } else {
         cardObj.style.backgroundImage = 'url(' + back.src + ')';
@@ -781,7 +827,7 @@ function getCardUI(card, player) {
 //     Cards compress up to 60% visual overlap (CSS -64px) before the hand expands.
 //   - In both cases the hand uses as much available container space as possible
 //     before applying any extra overlap beyond the starting minimum.
-function repositionCards(player) {
+function layoutHand(player) {
     const hand = document.getElementById('hand_' + player.PlayerID);
     if (!hand) return;
 
@@ -792,6 +838,7 @@ function repositionCards(player) {
     const CSS_CARD_W = 107;
     const SCALE      = 0.6;
     const VIS_W      = CSS_CARD_W * SCALE; // 64.2px
+    const CARD_MARGIN_R = 3;               // the card's right margin from style.css
 
     if (player.SocketID == socketId) {
         // ── Own hand ──
@@ -810,7 +857,7 @@ function repositionCards(player) {
         }
 
         // CSS margin limits (negative = overlap)
-        const MIN_MARGIN = -57;  // starting / minimum overlap at low card counts (~53% visual)
+        const MIN_MARGIN = hand.dataset.revealed ? -57 : -82;  // revealed hands overlap less so faces are readable
         const MAX_MARGIN = -64;  // maximum allowed overlap before container must expand (~60% visual)
 
         // How wide is the hand's grid cell? Walk up to the grid item (.playerOpponent /
@@ -842,16 +889,19 @@ function repositionCards(player) {
             return;
         }
 
-        const MIN_MARGIN = -82;  // starting / minimum overlap (~77% visual)
-        const MAX_MARGIN = -92;  // maximum allowed overlap before container must expand (~87% visual)
+        const MIN_MARGIN = -82;  // starting overlap at low card counts
 
         const gridCell = hand.closest('.playerOpponent, .playerSelf');
         const containerW = (gridCell ? gridCell.offsetWidth : hand.offsetWidth) || 200;
         const usableW = containerW - 10;
 
-        const fitMargin = ((usableW - VIS_W) / (cardCount - 1) - VIS_W) / SCALE;
+        // Margins aren't scaled by the card's transform, so each card advances by
+        // CSS_CARD_W + its right margin + marginLeft. Solve for the margin that
+        // makes the whole fan fit inside the cell.
+        const fitMargin = (usableW - VIS_W) / (cardCount - 1) - CSS_CARD_W - CARD_MARGIN_R;
 
-        const margin = Math.max(MAX_MARGIN, Math.min(MIN_MARGIN, fitMargin));
+        // No lower limit: always compress as much as needed to stay inside the cell
+        const margin = Math.min(MIN_MARGIN, fitMargin);
 
         cards.forEach((card, i) => {
             card.style.marginLeft = (i === 0 ? 0 : margin) + 'px';
@@ -859,6 +909,37 @@ function repositionCards(player) {
         });
     }
 }
+
+function repositionCards(player) {
+    layoutHand(player);
+    scheduleOpponentRefit();
+}
+
+// Cell widths are shared between players, so when any hand changes (or the window
+// resizes) every opponent hand is re-fitted. A few passes let the widths settle.
+let refitQueued = false;
+
+function opponentCellWidths() {
+    return Array.from(document.querySelectorAll('.playerOpponent'))
+        .map(cell => cell.offsetWidth).join(',');
+}
+
+function scheduleOpponentRefit() {
+    if (refitQueued) return;
+    refitQueued = true;
+    requestAnimationFrame(() => {
+        refitQueued = false;
+        for (let pass = 0; pass < 3; pass++) {
+            const before = opponentCellWidths();
+            document.querySelectorAll('.playerOpponent .hand').forEach(h => {
+                layoutHand({ SocketID: null, PlayerID: h.id.replace('hand_', '') });
+            });
+            if (opponentCellWidths() === before) break;
+        }
+    });
+}
+
+window.addEventListener('resize', scheduleOpponentRefit);
 
 // Highlight playable cards and dim unplayable ones based on the current game state
 function updatePlayableCards(topCard, currentColor) {
@@ -974,6 +1055,20 @@ socket.on('cardDrawn', function() {
     playSound(f);
 });
 
+// ── Admin actions ──
+
+// The admin asked the client to reload
+socket.on('adminRefresh', () => location.reload());
+
+// The admin gave the host role to someone else
+socket.on('demoted', function() {
+    isPlayerA = false;
+    setOptionsEditable(false);
+    hide('options');
+    hide('btnStart');
+    hide('btnDeal');
+});
+
 // ── Persistence ──
 
 function savePlayerName(name) {
@@ -1015,10 +1110,12 @@ function createPlayersUI(players) {
         let div_points = document.createElement('div');
         let div_hands_won = document.createElement('div');
 
-        if(isPlayerA) {
-            div_player_name.style.cursor = 'pointer';
-            div_player_name.addEventListener('click', () => showBootModal(players[i].SocketID, players[i].Name));
-        }
+        // Clicking an opponent's name offers to boot them, but only while this client is the host.
+        // Checked at click time so it stays correct when the host changes mid-game.
+        div_player_name.addEventListener('click', () => {
+            if (!isPlayerA || players[i].SocketID === socketId) return;
+            showBootModal(players[i].Name);
+        });
 
         div_player_name.className = 'name';
         div_points.className = 'points';
@@ -1070,6 +1167,19 @@ function showOptions() {
     } else {
         show('options', 'flex');
     }
+}
+
+// Enable or disable the options panel; non-hosts get a read-only view
+function setOptionsEditable(editable) {
+    document.querySelectorAll('#options input[type="checkbox"]').forEach(cb => {
+        cb.disabled = !editable;
+    });
+    document.getElementById('options').classList.toggle('readonly', !editable);
+    document.getElementById('btnSaveOptions').style.display = editable ? '' : 'none';
+    document.getElementById('optionsReadOnlyNote').style.display = editable ? 'none' : 'block';
+
+    // Host-only styling hook (clickable opponent names for booting)
+    document.body.classList.toggle('is-host', editable);
 }
 
 function saveOptions() {
@@ -1170,11 +1280,20 @@ socket.on('booted', () => {
 
 // ── End-of-hand summary modal ──
 
-socket.on('handSummary', function(summary) {
+// Sort helpers for the summary tables. Kept as plain functions so the tests can mirror them.
+const byTimeThenCards = (cardsKey, timeKey) => (a, b) => (a[timeKey] - b[timeKey]) || (b[cardsKey] - a[cardsKey]);
+const byCardsDrawn = (forcedKey, receivedKey, searchedKey, selfKey) => (a, b) =>
+    ((b[receivedKey] + b[searchedKey] + b[selfKey]) - (a[receivedKey] + a[searchedKey] + a[selfKey])) || (b[forcedKey] - a[forcedKey]);
+
+function renderHandSummary(summary, isReview) {
+    const handLabel = isReview ? 'Last hand' : 'This hand';
     const modal = document.getElementById('handSummaryModal');
     const content = document.getElementById('handSummaryContent');
 
     const ps = summary.playerStats || [];
+
+    // Tint the viewer's own row in every table
+    const rowClass = name => name === playerName ? ' class="own-row"' : '';
 
     // Truncate long player names so they don't break table layout
     const MAX_NAME = 12;
@@ -1188,15 +1307,28 @@ socket.on('handSummary', function(summary) {
     const tdStyle = 'padding:6px 8px;font-size:14px;';
     const tdRight = 'text-align:right;padding:6px 8px;font-size:14px;';
 
-    // Build one table row per player showing cards played and time spent
+    // Build one table row per player showing cards played and time spent.
+    // The fastest / slowest players (lowest / highest average time per card) get a badge.
     function buildTurnRows(cardsKey, timeKey) {
-        return ps.map(p =>
-            `<tr>
-                <td style="${tdStyle}">${truncate(p.name)}</td>
+        const avg = p => p[cardsKey] > 0 ? p[timeKey] / p[cardsKey] : null;
+        const avgs = ps.map(avg).filter(a => a !== null);
+        const fastest = Math.min(...avgs);
+        const slowest = Math.max(...avgs);
+        const ranked = avgs.length >= 2 && fastest !== slowest;
+
+        return ps.slice().sort(byTimeThenCards(cardsKey, timeKey)).map(p => {
+            const a = avg(p);
+            let badge = '';
+            if (ranked && a !== null) {
+                if (a === fastest) badge = ' <span title="Fastest: lowest average time per card">🐇</span>';
+                else if (a === slowest) badge = ' <span title="Slowest: highest average time per card">🐢</span>';
+            }
+            return `<tr${rowClass(p.name)}>
+                <td style="${tdStyle}">${truncate(p.name)}${badge}</td>
                 <td style="${tdRight}">${p[cardsKey]}</td>
                 <td style="${tdRight}">${formatDuration(p[timeKey])}</td>
-            </tr>`
-        ).join('');
+            </tr>`;
+        }).join('');
     }
 
     const handTurnRows = buildTurnRows('handCardsPlayed', 'handTurnTime');
@@ -1208,7 +1340,7 @@ socket.on('handSummary', function(summary) {
         .map(p => {
             const netColor = p.netPoints >= 0 ? 'color:#3db87a;font-weight:600;' : 'color:#c94f5f;font-weight:600;';
             const netStr = (p.netPoints >= 0 ? '+' : '') + p.netPoints;
-            return `<tr>
+            return `<tr${rowClass(p.name)}>
                 <td style="${tdStyle}font-weight:600;">${truncate(p.name)}</td>
                 <td style="${tdRight}">${p.pointsScored}</td>
                 <td style="${tdRight}">${p.pointsGivenUp}</td>
@@ -1216,17 +1348,36 @@ socket.on('handSummary', function(summary) {
             </tr>`;
         }).join('');
 
+    // Cards drawn: most cards drawn (received + searched + self-owned) first, then most forced on others
+    function buildDrawRows(forcedKey, receivedKey, searchedKey, selfKey) {
+        return ps.slice().sort(byCardsDrawn(forcedKey, receivedKey, searchedKey, selfKey)).map(p => `<tr${rowClass(p.name)}>
+                <td style="${tdStyle}">${truncate(p.name)}</td>
+                <td style="${tdRight}">${p[forcedKey]}</td>
+                <td style="${tdRight}">${p[receivedKey]}</td>
+                <td style="${tdRight}">${p[searchedKey]}</td>
+                <td style="${tdRight}">${p[selfKey]}</td>
+            </tr>`).join('');
+    }
+    const handDrawRows = buildDrawRows('handForced', 'handReceived', 'handSearched', 'handSelfOwned');
+    const matchDrawRows = buildDrawRows('matchForced', 'matchReceived', 'matchSearched', 'matchSelfOwned');
+
+    // Column headers for the cards-drawn tables (hover text explains each column)
+    const drawHeader = `<thead><tr>
+                        <th style="${thStyle}">Player</th>
+                        <th style="${thRight}" title="Cards others drew because of your plays or Quno calls">Forced</th>
+                        <th style="${thRight}" title="Cards you drew because of other players">Received</th>
+                        <th style="${thRight}" title="Cards you drew to find a playable card">Searched</th>
+                        <th style="${thRight}" title="Cards you drew because of yourself: your own Quno penalties and stacked cards you ended up drawing">Self-owned</th>
+                    </tr></thead>`;
+
     const sc = 'padding:10px 0 10px;border-bottom:1px solid rgba(0,232,154,0.15);';
     const slabel = 'font-size:11px;color:#6b8a7a;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px;';
     const sval = 'font-size:1.15rem;font-weight:700';
 
-    // Pad the points-given-up table to match the standings row count
-    const breakdownRows = summary.breakdown.length;
-    const standingsCount = ps.length;
-    const paddingRows = Math.max(0, standingsCount - breakdownRows);
-    const breakdownpadding = paddingRows > 0
-        ? `<tr><td colspan="2" style="padding:${paddingRows * 33}px 0 0;"></td></tr>`
-        : '';
+    // Pad the points-given-up table with blank rows (same styling as real rows) so it
+    // matches the standings row count and the tables below line up
+    const paddingRows = Math.max(0, ps.length - summary.breakdown.length);
+    const breakdownpadding = `<tr><td style="${tdStyle}">&nbsp;</td><td style="${tdRight}">&nbsp;</td></tr>`.repeat(paddingRows);
 
     const html = `
         <h2 style="margin:0 0 20px;text-align:center;">Hand Summary</h2>
@@ -1234,11 +1385,11 @@ socket.on('handSummary', function(summary) {
 
             <!-- LEFT: HAND STATS -->
             <div>
-                <p style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#6b8a7a;margin:0 0 12px;">This hand</p>
+                <p style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#6b8a7a;margin:0 0 12px;">${handLabel}</p>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:0;margin-bottom:20px;">
                     <div style="${sc}padding-right:12px;"><div style="${slabel}">Winner</div><div style="${sval}color:#3db87a;">${truncate(summary.winner)}</div></div>
                     <div style="${sc}padding-left:12px;"><div style="${slabel}">Points scored</div><div style="${sval}">${summary.pointsThisHand}</div></div>
-                    <div style="${sc}padding-right:12px;"><div style="${slabel}">Duration</div><div style="${sval}">${formatDuration(summary.handDuration)}</div></div>
+                    <div style="${sc}padding-right:12px;border-bottom:none;"><div style="${slabel}">Duration</div><div style="${sval}">${formatDuration(summary.handDuration)}</div></div>
                     <div style="${sc}padding-left:12px;border-bottom:none;"><div style="${slabel}">Cards played</div><div style="${sval}">${summary.handCardsPlayed}</div></div>
                 </div>
 
@@ -1249,12 +1400,12 @@ socket.on('handSummary', function(summary) {
                         <th style="${thRight}">Points</th>
                     </tr></thead>
                     <tbody>
-                        ${summary.breakdown.map(b => `<tr><td style="${tdStyle}">${truncate(b.name)}</td><td style="${tdRight}">${b.points}</td></tr>`).join('')}
+                        ${summary.breakdown.slice().sort((a, b) => b.points - a.points).map(b => `<tr${rowClass(b.name)}><td style="${tdStyle}">${truncate(b.name)}</td><td style="${tdRight}">${b.points}</td></tr>`).join('')}
                         ${breakdownpadding}
                     </tbody>
                 </table>
 
-                <p style="${slabel}margin:0 0 8px;">Time spent (this hand)</p>
+                <p style="${slabel}margin:0 0 8px;">Time spent (${handLabel.toLowerCase()})</p>
                 <table style="width:100%;border-collapse:collapse;">
                     <thead><tr>
                         <th style="${thStyle}">Player</th>
@@ -1262,6 +1413,12 @@ socket.on('handSummary', function(summary) {
                         <th style="${thRight}">Time</th>
                     </tr></thead>
                     <tbody>${handTurnRows}</tbody>
+                </table>
+
+                <p style="${slabel}margin:18px 0 8px;">Cards drawn (${handLabel.toLowerCase()})</p>
+                <table style="width:100%;border-collapse:collapse;">
+                    ${drawHeader}
+                    <tbody>${handDrawRows}</tbody>
                 </table>
             </div>
 
@@ -1294,12 +1451,35 @@ socket.on('handSummary', function(summary) {
                     </tr></thead>
                     <tbody>${matchTurnRows}</tbody>
                 </table>
+
+                <p style="${slabel}margin:18px 0 8px;">Cards drawn (match total)</p>
+                <table style="width:100%;border-collapse:collapse;">
+                    ${drawHeader}
+                    <tbody>${matchDrawRows}</tbody>
+                </table>
             </div>
         </div>
     `;
 
     content.innerHTML = html;
     modal.style.display = 'flex';
+}
+
+socket.on('handSummary', summary => renderHandSummary(summary, false));
+
+function requestStats() {
+    socket.emit('requestStats');
+}
+
+socket.on('statsData', function(summary) {
+    if (summary) {
+        renderHandSummary(summary, true);
+    } else {
+        document.getElementById('handSummaryContent').innerHTML =
+            '<h2 style="margin:0 0 12px;text-align:center;">Stats</h2>' +
+            '<p style="text-align:center;">No hands have been completed yet.</p>';
+        document.getElementById('handSummaryModal').style.display = 'flex';
+    }
 });
 
 // Format a duration in seconds as "Xh Ym Zs", omitting leading zeroes
@@ -1331,4 +1511,5 @@ masterCheckbox.addEventListener('click', () => {
     controlledCheckboxes.forEach(checkbox => { checkbox.checked = isChecked; });
 });
 
+setOptionsEditable(false);
 init();

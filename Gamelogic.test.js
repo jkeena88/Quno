@@ -8,7 +8,7 @@ const {
     cardColor, cardType, cardValue, buildCard,
     createDeck, shuffle,
     canPlay, getPoints, nextPlayerID, reshuffleSeats,
-    buildRequiredPlay, computeHandMargin,
+    buildRequiredPlay, computeHandMargin, recordDrawStats,
 } = require('./Gamelogic');
 
 // Test-only helper: build a minimal player object
@@ -27,6 +27,14 @@ function makePlayer(socketId, playerID, hand = [], extra = {}) {
         LastUnoYouTime: 0,
         HandCardsPlayed: 0,
         MatchCardsPlayed: 0,
+        HandForced: 0,
+        MatchForced: 0,
+        HandReceived: 0,
+        MatchReceived: 0,
+        HandSearched: 0,
+        MatchSearched: 0,
+        HandSelfOwned: 0,
+        MatchSelfOwned: 0,
         HandTurnTime: 0,
         MatchTurnTime: 0,
         PointsGivenUp: 0,
@@ -933,5 +941,154 @@ describe('formatDuration', () => {
     test('hours present with 0 seconds omits trailing seconds', () => {
         // 1h 1m exactly — no seconds component
         expect(formatDuration(3660)).toBe('1h 1m');
+    });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// getPoints — cards-drawn stats
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('getPoints — cards drawn stats', () => {
+    test('playerStats includes hand and match forced / received / searched counts', () => {
+        const map = new Map();
+        map.set('W', makePlayer('W', 0, [], { HandForced: 6, MatchForced: 14, HandReceived: 2, MatchReceived: 9, HandSearched: 3, MatchSearched: 8 }));
+        map.set('L', makePlayer('L', 1, [buildCard(5)]));
+        const { playerStats } = getPoints(map, map.get('W'));
+        const w = playerStats.find(p => p.name === 'Player0');
+
+        expect(w).toMatchObject({
+            handForced: 6, matchForced: 14,
+            handReceived: 2, matchReceived: 9,
+            handSearched: 3, matchSearched: 8,
+            handSelfOwned: 0, matchSelfOwned: 0,
+        });
+    });
+
+    test('players with no draws report zeros', () => {
+        const map = new Map();
+        map.set('W', makePlayer('W', 0, []));
+        map.set('L', makePlayer('L', 1, [buildCard(5)]));
+        const { playerStats } = getPoints(map, map.get('W'));
+        playerStats.forEach(p => expect(p).toMatchObject({
+            handForced: 0, matchForced: 0, handReceived: 0, matchReceived: 0, handSearched: 0, matchSearched: 0,
+            handSelfOwned: 0, matchSelfOwned: 0,
+        }));
+    });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Summary table sorting  (mirrors the comparators in main.js)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const byTimeThenCards = (cardsKey, timeKey) => (a, b) => (a[timeKey] - b[timeKey]) || (b[cardsKey] - a[cardsKey]);
+const byCardsDrawn = (forcedKey, receivedKey, searchedKey, selfKey) => (a, b) =>
+    ((b[receivedKey] + b[searchedKey] + b[selfKey]) - (a[receivedKey] + a[searchedKey] + a[selfKey])) || (b[forcedKey] - a[forcedKey]);
+
+describe('summary table sorting', () => {
+    test('time spent: lowest time first, ties broken by most cards', () => {
+        const rows = [
+            { name: 'A', handCardsPlayed: 5,  handTurnTime: 60 },
+            { name: 'B', handCardsPlayed: 9,  handTurnTime: 30 },
+            { name: 'C', handCardsPlayed: 12, handTurnTime: 60 },
+        ];
+        const sorted = rows.slice().sort(byTimeThenCards('handCardsPlayed', 'handTurnTime')).map(r => r.name);
+        expect(sorted).toEqual(['B', 'C', 'A']);
+    });
+
+    test('cards drawn: most received + searched + self-owned first, ties broken by most forced', () => {
+        const rows = [
+            { name: 'A', handForced: 1, handReceived: 2, handSearched: 3, handSelfOwned: 0 }, // 5
+            { name: 'B', handForced: 4, handReceived: 4, handSearched: 2, handSelfOwned: 0 }, // 6
+            { name: 'C', handForced: 9, handReceived: 5, handSearched: 0, handSelfOwned: 0 }, // 5
+            { name: 'D', handForced: 0, handReceived: 1, handSearched: 1, handSelfOwned: 5 }, // 7
+        ];
+        const sorted = rows.slice().sort(byCardsDrawn('handForced', 'handReceived', 'handSearched', 'handSelfOwned')).map(r => r.name);
+        expect(sorted).toEqual(['D', 'B', 'C', 'A']);
+    });
+
+    test('forced alone does not affect the primary order', () => {
+        const rows = [
+            { name: 'A', matchForced: 50, matchReceived: 1, matchSearched: 1, matchSelfOwned: 0 },
+            { name: 'B', matchForced: 0,  matchReceived: 2, matchSearched: 1, matchSelfOwned: 0 },
+        ];
+        const sorted = rows.slice().sort(byCardsDrawn('matchForced', 'matchReceived', 'matchSearched', 'matchSelfOwned')).map(r => r.name);
+        expect(sorted).toEqual(['B', 'A']);
+    });
+});
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// recordDrawStats
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('recordDrawStats', () => {
+    function makeTable() {
+        const map = new Map();
+        ['A', 'B', 'C'].forEach((n, i) => map.set(n, makePlayer(n, i, [], { Name: n })));
+        return map;
+    }
+
+    test('stack payout: drawer receives the cards others added, each contributor is credited Forced', () => {
+        const map = makeTable();
+        // A +2, B +2, C +2 → A draws 6 (the stack wrapped back around to A)
+        recordDrawStats(map, map.get('A'), 6, [['A', 2], ['B', 2], ['C', 2]]);
+
+        expect(map.get('A').HandReceived).toBe(4); // B's 2 + C's 2; A's own 2 are self-owned
+        expect(map.get('B').HandForced).toBe(2);
+        expect(map.get('C').HandForced).toBe(2);
+    });
+
+    test('cards you added to a stack you end up drawing count as self-owned, not forced', () => {
+        const map = makeTable();
+        recordDrawStats(map, map.get('A'), 6, [['A', 2], ['B', 2], ['C', 2]]);
+
+        const a = map.get('A');
+        expect(a.HandSelfOwned).toBe(2);
+        expect(a.MatchSelfOwned).toBe(2);
+        expect(a.HandForced).toBe(0);
+        expect(a.HandReceived).toBe(4); // self-owned is separate: 4 from others + 2 own = 6 drawn
+    });
+
+    test('a plain stack on someone else has no self-owned cards', () => {
+        const map = makeTable();
+        recordDrawStats(map, map.get('B'), 4, [['A', 4]]);
+
+        expect(map.get('A').HandForced).toBe(4);
+        expect(map.get('A').HandSelfOwned).toBe(0);
+        expect(map.get('B').HandReceived).toBe(4);
+        expect(map.get('B').HandSelfOwned).toBe(0);
+    });
+
+    test('self-inflicted Quno penalty is self-owned only, not received', () => {
+        const map = makeTable();
+        recordDrawStats(map, map.get('C'), 2, [], true);
+
+        const c = map.get('C');
+        expect(c.HandReceived).toBe(0);
+        expect(c.MatchReceived).toBe(0);
+        expect(c.HandSelfOwned).toBe(2);
+        expect(c.MatchSelfOwned).toBe(2);
+    });
+
+    test('Quno catch: caller is credited Forced, victim receives', () => {
+        const map = makeTable();
+        recordDrawStats(map, map.get('B'), 4, [['A', 4]]);
+
+        expect(map.get('A').MatchForced).toBe(4);
+        expect(map.get('B').MatchReceived).toBe(4);
+    });
+
+    test('contributors who left the game are ignored without error', () => {
+        const map = makeTable();
+        expect(() => recordDrawStats(map, map.get('A'), 4, [['Gone', 4]])).not.toThrow();
+        expect(map.get('A').HandReceived).toBe(4);
+    });
+
+    test('hand and match counters both increase', () => {
+        const map = makeTable();
+        map.get('A').MatchForced = 10;
+        recordDrawStats(map, map.get('B'), 2, [['A', 2]]);
+        expect(map.get('A').HandForced).toBe(2);
+        expect(map.get('A').MatchForced).toBe(12);
     });
 });

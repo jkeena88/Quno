@@ -5,13 +5,19 @@ const app = express();
 const server = require('http').Server(app);
 const io = require('socket.io')(server);
 const port = process.env.PORT || 3000;
+const path = require('path');
+const crypto = require('crypto');
 
 const {
     buildCard, createDeck: buildDeck, shuffle,
-    canPlay: canPlayHand, getPoints, nextPlayerID, reshuffleSeats: reshuffleSeatsMap,
+    canPlay: canPlayHand, getPoints, nextPlayerID, reshuffleSeats: reshuffleSeatsMap, recordDrawStats,
 } = require('./Gamelogic');
 
 app.use(express.static(__dirname + '/public', { 'Content-Type': 'application/javascript' }));
+app.get('/admin', (req, res) => {
+    res.set({ 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex' });
+    res.sendFile(path.join(__dirname, 'admin.html'));
+});
 io.on('connection', onConnection);
 server.listen(port, () => console.log('listening on port ' + port));
 
@@ -27,10 +33,12 @@ let currentColor;        // active card color
 let currentType;         // active card type (number, skip, etc.)
 let cardsToDraw = 0;     // accumulated cards a player must draw (from stacked draw 2s / draw 4s)
 let stackType = null;    // 'draw2' | 'draw4' | null — which draw type is currently being stacked
+let stackContributions = new Map(); // player name → cards they added to the current draw stack (for "forced" stats)
 let pendingSkipTarget = null; // socket ID of the player who is about to be skipped (null if no skip pending)
 let discardPile = [];
 let players = new Map(); // socket ID → player object
 let pendingPlayers = []; // socket IDs of players waiting to join at the next hand start
+let waitingList = [];    // socket IDs waiting for a seat because the game is full (oldest first)
 let playersInLobby = []; // ordered list of player names, for the lobby display
 let hostName = null;
 let deck = [];
@@ -45,6 +53,7 @@ let handsPlayed = 0;
 let matchCardsPlayed = 0;
 let handCardsPlayed = 0;
 let turnStartTime = null;
+let lastHandSummary = null; // stats snapshot from the most recently completed hand
 
 // ── Options (all off by default) ──
 let playWildDraw4 = false;  // allow Wild Draw 4 regardless of hand contents
@@ -67,74 +76,30 @@ function onConnection(socket) {
 
     // Boot a player from the game (host only)
     socket.on('bootPlayer', (targetName) => {
-        if(socket.id == playerA) {
-            // Try to find a live socket first; if the player navigated away their socket
-            // is already gone, so fall back to looking them up in the players Map by name.
-            const targetSocket = Array.from(io.sockets.sockets.values()).find(s => s.playerName === targetName);
-            const targetPlayerEntry = targetSocket
-                ? players.get(targetSocket.id)
-                : Array.from(players.values()).find(p => p.Name === targetName);
-
-            if (targetPlayerEntry) {
-                const targetSocketId = targetPlayerEntry.SocketID;
-                const wasCurrentPlayer = (targetSocketId === currentPlayer);
-
-                if (targetSocket) {
-                    // Player is still connected — tell their browser and disconnect them
-                    targetSocket.wasBooted = true;
-                    targetSocket.emit('booted');
-                    targetSocket.disconnect(true);
-                }
-                // (If the socket is already gone we just do state cleanup below)
-
-                // If it's the booted player's turn, advance BEFORE removing them
-                if (wasCurrentPlayer && players.size > 2) {
-                    nextTurn();
-                }
-
-                // Clean up all server state for this player
-                playersInLobby = playersInLobby.filter(p => p !== targetName);
-                pendingPlayers = pendingPlayers.filter(id => id !== targetSocketId);
-                const leavingPlayerId = targetPlayerEntry.PlayerID;
-                players.delete(targetSocketId);
-
-                io.emit('playerLeft', { playerName: targetName, playerId: leavingPlayerId });
-                io.emit('setHost', hostName);
-                io.emit('newPlayer', { players: playersInLobby, host: hostName });
-                io.emit('logMessage', targetName + ' was booted by the host');
-
-                // End the game if too few players remain to continue
-                if (players.size <= 1) {
-                    gameIsOver = true;
-                    io.emit('turnChange', -1);
-                    io.emit('logMessage', 'Game over — not enough players to continue');
-                }
-            }
-        }
+        if(socket.id == playerA) bootPlayerByName(targetName);
     });
 
     socket.on('disconnect', () => {
         // If this socket was booted by the host, bootPlayer already cleaned everything up
         if (socket.wasBooted) return;
 
+        // Someone waiting for a seat just stops waiting; nothing else to clean up
+        if (waitingList.includes(socket.id)) {
+            waitingList = waitingList.filter(id => id !== socket.id);
+            recordEvent(`${socket.playerName} stopped waiting for a seat`);
+            waitingList.forEach((id, i) => io.to(id).emit('roomFull', { position: i + 1, maxPlayers }));
+            return;
+        }
+
         const disconnectedName = socket.playerName;
         const disconnectedId = socket.id;
 
-        // If the host disconnected, promote a new host immediately — don't wait
-        // for the grace period, so other players aren't stuck on the waiting overlay.
-        if (disconnectedId === playerA) {
-            playerA = null;
-            hostName = null;
-            const nextSocket = Array.from(io.sockets.sockets.values())
-                .find(s => s.id !== disconnectedId && s.playerName);
-            if (nextSocket) {
-                playerA = nextSocket.id;
-                hostName = nextSocket.playerName;
-                io.to(nextSocket.id).emit('isPlayerA', { gameInProgress: !gameIsOver });
-                io.to(nextSocket.id).emit('updateOptions', { playWildDraw4, stackDraw2, skipDraw2, reverseDraw2, skipSkip, stackDraw4, skipDraw4, reverseDraw4 });
-                io.emit('setHost', hostName);
-                io.emit('newPlayer', { players: playersInLobby, host: hostName });
-            }
+        recordEvent(`${disconnectedName || 'A visitor'} disconnected`);
+
+        // If the host disconnected, promote a new host immediately, unless the admin just
+        // refreshed their page; then they keep the role through the grace period below
+        if (disconnectedId === playerA && !socket.adminRefresh) {
+            promoteNextHost(disconnectedId);
         }
 
         // Stamp the disconnect time so requestJoin can enforce the grace window
@@ -144,12 +109,17 @@ function onConnection(socket) {
         }
 
         setTimeout(() => {
+            // A host whose page was refreshed by the admin never came back: hand the role on now
+            if (disconnectedId === playerA) promoteNextHost(disconnectedId);
+
             // The player rejoined successfully if their old socket ID was replaced in the
             // map (disconnectedAt cleared) or if the old entry is simply gone (new socket
             // took over). If the entry still has a disconnectedAt stamp it means nobody
             // has reclaimed this slot — treat it as a permanent leave.
             const entry = players.get(disconnectedId);
-            const hasRejoined = !entry || entry.disconnectedAt === undefined;
+            const hasRejoined = entry
+                ? entry.disconnectedAt === undefined
+                : (!disconnectedName || Array.from(io.sockets.sockets.values()).some(s => s.playerName === disconnectedName));
 
             if (!hasRejoined) {
                 playersInLobby = playersInLobby.filter(p => p !== disconnectedName);
@@ -158,11 +128,12 @@ function onConnection(socket) {
                 players.delete(disconnectedId);
                 io.emit('playerLeft', { playerName: disconnectedName, playerId: leavingPlayerId });
                 io.emit('newPlayer', { players: playersInLobby, host: hostName });
-                io.emit('logMessage', disconnectedName + ' left the game');
+                logEvent(disconnectedName + ' left the game');
 
                 if (disconnectedId === currentPlayer && !gameIsOver) {
                     nextTurn();
                 }
+                if (players.size === 0) promoteWaiting(); // no match yet: seat the next person right away
             }
         }, REJOIN_GRACE_MS);
     });
@@ -220,115 +191,73 @@ function onConnection(socket) {
                 stackType: stackType,
                 cardsToDraw: cardsToDraw,
                 playDirection: playDirection,
+                deckCount: deck.length,
+                discardCount: discardPile.length,
                 isHost: socket.id === playerA,
                 hostName: hostName,
                 playersInLobby: playersInLobby,
                 playWildDraw4
             });
+            if (gameIsOver) {
+                io.to(socket.id).emit('revealHands', revealPayload());
+            }
             io.emit('newPlayer', { players: playersInLobby, host: hostName });
-            io.emit('logMessage', playerName + ' rejoined the game');
+            logEvent(playerName + ' rejoined the game');
+            io.to(socket.id).emit('updateOptions', { playWildDraw4, stackDraw2, skipDraw2, reverseDraw2, skipSkip, stackDraw4, skipDraw4, reverseDraw4 });
             if (socket.id === playerA) {
                 io.to(socket.id).emit('isPlayerA', { gameInProgress: !gameIsOver });
-                io.to(socket.id).emit('updateOptions', { playWildDraw4, stackDraw2, skipDraw2, reverseDraw2, skipSkip, stackDraw4, skipDraw4, reverseDraw4 });
                 io.emit('setHost', hostName);
             }
             return;
         }
 
         // First player to join becomes the host
+        let becameHost = false;
         if(playerA == null) {
             playerA = socket.id;
             hostName = playerName;
+            becameHost = true;
             io.to(socket.id).emit('isPlayerA');
             io.emit('setHost', hostName);
         }
 
-        io.to(socket.id).emit('updateOptions', {playWildDraw4});
+        io.to(socket.id).emit('updateOptions', { playWildDraw4, stackDraw2, skipDraw2, reverseDraw2, skipSkip, stackDraw4, skipDraw4, reverseDraw4 });
 
-        let people;
-        try {
-            people = io.engine.clientsCount;
-        } catch (e) {
-            people = 0;
+        // Game is full (or others are already queued ahead of this person): wait for a seat
+        if (!playersInLobby.includes(playerName) &&
+            (playersInLobby.length >= maxPlayers || waitingList.length > 0)) {
+            if (!waitingList.includes(socket.id)) waitingList.push(socket.id);
+            io.to(socket.id).emit('roomFull', { position: waitingList.indexOf(socket.id) + 1, maxPlayers });
+            logEvent(playerName + ' is waiting for a seat (the game is full)');
+            return;
         }
 
-        if(people < maxPlayers) {
-            socket.join();
-            if (!playersInLobby.includes(playerName)) {
-                playersInLobby.push(playerName);
-            }
-            io.to(socket.id).emit('responseRoom', [people + 1, maxPlayers]);
-            io.emit('newPlayer', {players: playersInLobby, host: hostName});
-            io.emit('logMessage', playerName + ' joined the game');
+        socket.join();
+        if (!playersInLobby.includes(playerName)) {
+            playersInLobby.push(playerName);
+        }
+        io.to(socket.id).emit('responseRoom', [playersInLobby.length, maxPlayers]);
+        io.emit('newPlayer', {players: playersInLobby, host: hostName});
+        logEvent(playerName + ' joined the game');
+        if (becameHost) {
+            logEvent(playerName + ' is now the host');
+        }
 
-            // If a hand is currently in progress, hold this player in a pending queue
-            // rather than adding them to the active game — they'll join at the next hand.
-            if (!gameIsOver && players.size > 0) {
-                if (!pendingPlayers.includes(socket.id)) {
-                    pendingPlayers.push(socket.id);
-                }
-                io.to(socket.id).emit('pendingJoin');
-                return;
+        // If a hand is currently in progress, hold this player in a pending queue
+        // rather than adding them to the active game — they'll join at the next hand.
+        if (!gameIsOver && players.size > 0) {
+            if (!pendingPlayers.includes(socket.id)) {
+                pendingPlayers.push(socket.id);
             }
-
-            return;
-        } else {
-            io.to(socket.id).emit('responseRoom', 'error');
+            io.to(socket.id).emit('pendingJoin');
         }
     });
 
     // Start a new match (resets scores and seats)
-    socket.on('resetGame', function() {
-        let playerCount = io.engine.clientsCount;
-        matchStartTime = Date.now();
-        handsPlayed = 0;
-        matchCardsPlayed = 0;
-        pendingPlayers = [];
-
-        if(playerCount > 1) {
-            io.emit('logMessage', 'A new match was started');
-            createPlayers();
-            startGame();
-        }
-    });
+    socket.on('resetGame', () => startNewMatch());
 
     // Deal a new hand without resetting scores
-    socket.on('newHand', function() {
-        // Absorb any players who joined during the previous hand
-        if (pendingPlayers.length > 0) {
-            const nextID = players.size; // start assigning IDs after existing players
-            pendingPlayers.forEach((pendingSocketId, i) => {
-                const pendingSocket = io.sockets.sockets.get(pendingSocketId);
-                if (!pendingSocket) return; // socket disconnected before hand ended
-                const player = {
-                    Name: pendingSocket.playerName,
-                    PlayerID: nextID + i,
-                    Points: 0,
-                    HandsWon: 0,
-                    Hand: [],
-                    SocketID: pendingSocketId,
-                    HasCalledUno: false,
-                    HasCalledUnoMeThisTurn: false,
-                    HasCalledUnoYou: false,
-                    LastUnoMeTime: 0,
-                    LastUnoYouTime: 0,
-                    HandCardsPlayed: 0,
-                    MatchCardsPlayed: 0,
-                    HandTurnTime: 0,
-                    MatchTurnTime: 0,
-                    PointsGivenUp: 0,
-                    WaitingForColorChoice: false
-                };
-                players.set(pendingSocketId, player);
-                io.emit('logMessage', pendingSocket.playerName + ' joined the game');
-            });
-            pendingPlayers = [];
-        }
-
-        io.emit('logMessage', 'A new hand was dealt');
-        reshuffleSeats();
-        startGame();
-    });
+    socket.on('newHand', () => dealNewHand());
 
     socket.on('playCard', async function(card) {
         let player = players.get(socket.id);
@@ -373,7 +302,7 @@ function onConnection(socket) {
                 io.to(currentPlayer).emit('requiredPlay', requiredPlay);
                 discardCard(card, socket.id);
                 io.emit('hideColor');
-                io.emit('logMessage', socket.playerName + ' played a ' + playColor + ' ' + playType);
+                logEvent(socket.playerName + ' played a ' + playColor + ' ' + playType);
 
                 // Defer the win check for draw/skip/reverse cards — the effect still needs to resolve
                 const isDeferredWin = (playType === 'draw2' || playType === 'draw4') ||
@@ -389,6 +318,7 @@ function onConnection(socket) {
                 } else if(playType == 'draw4') {
                     cardsToDraw += 4;
                     stackType = 'draw4';
+                    stackContributions.set(player.Name, (stackContributions.get(player.Name) || 0) + 4);
                     emitGameStatus();
                     player.WaitingForColorChoice = true;
                     // requiredPlay will be set after color is chosen (in colorChosen handler)
@@ -397,6 +327,7 @@ function onConnection(socket) {
                 } else if(playType == 'draw2') {
                     cardsToDraw += 2;
                     stackType = 'draw2';
+                    stackContributions.set(player.Name, (stackContributions.get(player.Name) || 0) + 2);
                     emitGameStatus();
                     if (players.get(socket.id).Hand.length === 0) {
                         pendingWinnerSocketId = socket.id;
@@ -470,7 +401,7 @@ function onConnection(socket) {
 
         currentColor = color;
         io.emit('colorChosen', color);
-        io.emit('logMessage', 'The color was changed to ' + color);
+        logEvent('The color was changed to ' + color);
 
         if(cardsToDraw > 0) {
             // Wild Draw 4 was just played — advance and offer the stack
@@ -503,7 +434,7 @@ function onConnection(socket) {
         // Valid call: it's their turn with ≤2 cards, or they're down to 1 card on any turn
         if((player.Hand.length <= 2 && socket.id == currentPlayer) || player.Hand.length == 1) {
             if (!player.HasCalledUno) {
-                io.emit('logMessage', socket.playerName + ' called Uno');
+                logEvent(socket.playerName + ' called Quno');
                 player.HasCalledUno = true;
             }
         } else {
@@ -511,8 +442,8 @@ function onConnection(socket) {
             const recentlyGotUnoYou = player.LastUnoYouTime && (now - player.LastUnoYouTime < GRACE_MS);
 
             if (!recentlyGotUnoYou) {
-                io.emit('logMessage', socket.playerName + ' called Uno at the wrong time - oops!');
-                drawCards(socket.id, 2);
+                logEvent(socket.playerName + ' called Quno at the wrong time - oops!');
+                drawCards(socket.id, 2, { selfInflicted: true });
                 io.to(socket.id).emit('calledUnoMe');
             }
         }
@@ -533,41 +464,223 @@ function onConnection(socket) {
         const GRACE_MS = 1000;
 
         players.forEach((player) => {
+            if (player.SocketID === socket.id) return; // can't call Quno on yourself
             const recentlyCalledUnoMe = player.LastUnoMeTime && (now - player.LastUnoMeTime < GRACE_MS);
 
             // Catch any player who has 1 card and hasn't called Uno (and didn't just call it)
             if(player.Hand.length == 1 && !player.HasCalledUno && !recentlyCalledUnoMe) {
-                io.emit('logMessage', player.Name + ' had Uno called on them by ' + caller.Name);
-                drawCards(player.SocketID, 4);
+                logEvent(socket.playerName + ' called Quno at the wrong time - oops!');
+                drawCards(player.SocketID, 4, { forcedBy: [[caller.Name, 4]] });
                 player.LastUnoYouTime = Date.now();
             };
         });
     });
 
+    // Send the last completed-hand stats snapshot to whoever asks for it
+    socket.on('requestStats', function() {
+        socket.emit('statsData', lastHandSummary);
+    });
+
     // Save updated game options sent by the host
     socket.on('saveOptions', (data) => {
-        let selectedOptions = data.options;
-
-        playWildDraw4 = selectedOptions.includes('playWildDraw4');
-        stackDraw2 = selectedOptions.includes('stackDraw2');
-        skipDraw2 = selectedOptions.includes('skipDraw2');
-        reverseDraw2 = selectedOptions.includes('reverseDraw2');
-        skipSkip = selectedOptions.includes('skipSkip');
-        stackDraw4 = selectedOptions.includes('stackDraw4');
-        skipDraw4 = selectedOptions.includes('skipDraw4');
-        reverseDraw4 = selectedOptions.includes('reverseDraw4');
-
-        const allOptions = { playWildDraw4, stackDraw2, skipDraw2, reverseDraw2, skipSkip, stackDraw4, skipDraw4, reverseDraw4 };
-        io.emit('updateOptions', allOptions);
-
-        const optionLabels = {
-            playWildDraw4: 'Play Wild Draw 4 any time',
-            stackDraw2: 'Stack Draw 2s', skipDraw2: 'Skip Draw 2s', reverseDraw2: 'Reverse Draw 2s',
-            skipSkip: 'Skip a Skip',
-            stackDraw4: 'Stack Draw 4s', skipDraw4: 'Skip Draw 4s', reverseDraw4: 'Reverse Draw 4s',
-        };
-        io.emit('optionsChanged', { changedBy: socket.playerName, options: allOptions, labels: optionLabels });
+        if (socket.id !== playerA) return; // host only
+        applyOptions(data.options, socket.playerName);
     });
+}
+
+// Apply a list of enabled option names and tell everyone
+function applyOptions(selectedOptions, changedBy) {
+    if (!Array.isArray(selectedOptions)) return;
+
+    playWildDraw4 = selectedOptions.includes('playWildDraw4');
+    stackDraw2 = selectedOptions.includes('stackDraw2');
+    skipDraw2 = selectedOptions.includes('skipDraw2');
+    reverseDraw2 = selectedOptions.includes('reverseDraw2');
+    skipSkip = selectedOptions.includes('skipSkip');
+    stackDraw4 = selectedOptions.includes('stackDraw4');
+    skipDraw4 = selectedOptions.includes('skipDraw4');
+    reverseDraw4 = selectedOptions.includes('reverseDraw4');
+
+    const allOptions = { playWildDraw4, stackDraw2, skipDraw2, reverseDraw2, skipSkip, stackDraw4, skipDraw4, reverseDraw4 };
+    io.emit('updateOptions', allOptions);
+
+    const optionLabels = {
+        playWildDraw4: 'Play Wild Draw 4 any time',
+        stackDraw2: 'Stack Draw 2s', skipDraw2: 'Skip Draw 2s', reverseDraw2: 'Reverse Draw 2s',
+        skipSkip: 'Skip a Skip',
+        stackDraw4: 'Stack Draw 4s', skipDraw4: 'Skip Draw 4s', reverseDraw4: 'Reverse Draw 4s',
+    };
+    io.emit('optionsChanged', { changedBy, options: allOptions, labels: optionLabels });
+
+    const on = Object.keys(allOptions).filter(k => allOptions[k]);
+    recordEvent(`${changedBy} updated options (on: ${on.length ? on.join(', ') : 'none'})`);
+}
+
+function assignHost(targetSocket) {
+    if (playerA && playerA !== targetSocket.id) io.to(playerA).emit('demoted');
+    playerA = targetSocket.id;
+    hostName = targetSocket.playerName;
+    io.to(playerA).emit('isPlayerA', { gameInProgress: !gameIsOver });
+    io.to(playerA).emit('updateOptions', { playWildDraw4, stackDraw2, skipDraw2, reverseDraw2, skipSkip, stackDraw4, skipDraw4, reverseDraw4 });
+    io.emit('setHost', hostName);
+    io.emit('newPlayer', { players: playersInLobby, host: hostName });
+    logEvent(hostName + ' is now the host');
+}
+
+function promoteNextHost(excludeId) {
+    playerA = null;
+    hostName = null;
+    const next = Array.from(io.sockets.sockets.values())
+        .find(s => s.id !== excludeId && s.playerName && !waitingList.includes(s.id));
+    if (next) assignHost(next);
+}
+
+// Connected people who hold a seat in the lobby (everyone except those waiting for room)
+function lobbySockets() {
+    return Array.from(io.sockets.sockets.values())
+        .filter(s => s.playerName && !waitingList.includes(s.id));
+}
+
+// Give open seats to the people waiting, oldest first
+function promoteWaiting() {
+    let promoted = false;
+    while (waitingList.length > 0 && playersInLobby.length < maxPlayers) {
+        const id = waitingList.shift();
+        const s = io.sockets.sockets.get(id);
+        if (!s || playersInLobby.includes(s.playerName)) continue;
+        playersInLobby.push(s.playerName);
+        if (players.size > 0) pendingPlayers.push(id); // absorbed by dealNewHand
+        io.to(id).emit('roomJoined');
+        logEvent(s.playerName + ' joined the game');
+        promoted = true;
+    }
+    if (promoted) io.emit('newPlayer', { players: playersInLobby, host: hostName });
+    waitingList.forEach((id, i) => io.to(id).emit('roomFull', { position: i + 1, maxPlayers }));
+    if (playerA === null) promoteNextHost(null);
+}
+
+function startNewMatch() {
+    promoteWaiting();
+    if (lobbySockets().length < 2) return false;
+    matchStartTime = Date.now();
+    handsPlayed = 0;
+    matchCardsPlayed = 0;
+    pendingPlayers = [];
+    lastHandSummary = null;
+    logEvent('A new match was started');
+    createPlayers();
+    startGame();
+    return true;
+}
+
+function dealNewHand() {
+    // Absorb any players who joined during the previous hand
+    promoteWaiting();
+
+    // Close any gaps left by players who left, so seat IDs run 0..n-1
+    Array.from(players.values())
+        .sort((a, b) => a.PlayerID - b.PlayerID)
+        .forEach((p, i) => { p.PlayerID = i; });
+
+    if (pendingPlayers.length > 0) {
+        let nextID = players.size; // start assigning IDs after existing players
+        pendingPlayers.forEach((pendingSocketId) => {
+            const pendingSocket = io.sockets.sockets.get(pendingSocketId);
+            if (!pendingSocket) return; // socket disconnected before hand ended
+            const player = {
+                Name: pendingSocket.playerName,
+                PlayerID: nextID++,
+                Points: 0,
+                HandsWon: 0,
+                Hand: [],
+                SocketID: pendingSocketId,
+                HasCalledUno: false,
+                HasCalledUnoMeThisTurn: false,
+                HasCalledUnoYou: false,
+                LastUnoMeTime: 0,
+                LastUnoYouTime: 0,
+                HandCardsPlayed: 0,
+                MatchCardsPlayed: 0,
+                HandForced: 0,
+                MatchForced: 0,
+                HandReceived: 0,
+                MatchReceived: 0,
+                HandSearched: 0,
+                MatchSearched: 0,
+                HandSelfOwned: 0,
+                MatchSelfOwned: 0,
+                HandTurnTime: 0,
+                MatchTurnTime: 0,
+                PointsGivenUp: 0,
+                WaitingForColorChoice: false
+            };
+            players.set(pendingSocketId, player);
+            logEvent(pendingSocket.playerName + ' joined the game');
+        });
+        pendingPlayers = [];
+    }
+
+    logEvent('A new hand was dealt');
+    reshuffleSeats();
+    startGame();
+}
+
+function bootPlayerByName(targetName) {
+    // Try to find a live socket first; if the player navigated away their socket
+    // is already gone, so fall back to looking them up in the players Map by name.
+    const targetSocket = Array.from(io.sockets.sockets.values()).find(s => s.playerName === targetName);
+    const targetPlayerEntry = targetSocket
+        ? players.get(targetSocket.id)
+        : Array.from(players.values()).find(p => p.Name === targetName);
+
+    if (targetPlayerEntry) {
+        const targetSocketId = targetPlayerEntry.SocketID;
+        const wasCurrentPlayer = (targetSocketId === currentPlayer);
+
+        if (targetSocket) {
+            // Player is still connected — tell their browser and disconnect them
+            targetSocket.wasBooted = true;
+            targetSocket.emit('booted');
+            targetSocket.disconnect(true);
+        }
+        // (If the socket is already gone we just do state cleanup below)
+
+        // If it's the booted player's turn, advance BEFORE removing them
+        if (wasCurrentPlayer && players.size > 2) {
+            nextTurn();
+        }
+
+        // Clean up all server state for this player
+        playersInLobby = playersInLobby.filter(p => p !== targetName);
+        pendingPlayers = pendingPlayers.filter(id => id !== targetSocketId);
+        const leavingPlayerId = targetPlayerEntry.PlayerID;
+        players.delete(targetSocketId);
+
+        io.emit('playerLeft', { playerName: targetName, playerId: leavingPlayerId });
+        io.emit('setHost', hostName);
+        io.emit('newPlayer', { players: playersInLobby, host: hostName });
+        logEvent(targetName + ' was booted by the host');
+
+        // End the game if too few players remain to continue
+        if (players.size <= 1) {
+            gameIsOver = true;
+            io.emit('turnChange', -1);
+            logEvent('Game over — not enough players to continue');
+        }
+    }
+
+    else if (targetSocket) {
+        // In the lobby only (or waiting to join next hand): no seat to clean up
+        targetSocket.wasBooted = true;
+        targetSocket.emit('booted');
+        targetSocket.disconnect(true);
+        playersInLobby = playersInLobby.filter(p => p !== targetName);
+        pendingPlayers = pendingPlayers.filter(id => id !== targetSocket.id);
+        io.emit('newPlayer', { players: playersInLobby, host: hostName });
+        waitingList = waitingList.filter(id => id !== targetSocket.id);
+        if (players.size === 0) promoteWaiting();
+        logEvent(targetName + ' was booted');
+    }
 }
 
 // ── Thin wrappers around pure functions ──────────────────────────────────────
@@ -596,7 +709,7 @@ function createDeck() {
 function createPlayers() {
     players.clear();
 
-    Array.from(io.sockets.sockets.values()).forEach((socket, i) => {
+    lobbySockets().forEach((socket, i) => {
         const player = {
             Name: socket.playerName,
             PlayerID: i,
@@ -611,6 +724,14 @@ function createPlayers() {
             LastUnoYouTime: 0,
             HandCardsPlayed: 0,
             MatchCardsPlayed: 0,
+            HandForced: 0,
+            MatchForced: 0,
+            HandReceived: 0,
+            MatchReceived: 0,
+            HandSearched: 0,
+            MatchSearched: 0,
+            HandSelfOwned: 0,
+            MatchSelfOwned: 0,
             HandTurnTime: 0,
             MatchTurnTime: 0,
             PointsGivenUp: 0,
@@ -654,6 +775,7 @@ function performDraw(player) {
     io.emit('renderOpponentCard', player.PlayerID);
 
     io.emit('cardDrawn');
+    emitPileStatus();
 }
 
 // ── Stacking helpers ──────────────────────────────────────────────────────────
@@ -693,7 +815,7 @@ async function offerStack() {
 
     if (!playerCanStack) {
         // No stack possible — deal the cards now
-        await drawCards(currentPlayer, cardsToDraw);
+        await drawCards(currentPlayer, cardsToDraw, { paysStack: true, forcedBy: Array.from(stackContributions) });
         stackType = null;
         clearRequiredPlay();
         resolvePendingWin();
@@ -751,19 +873,39 @@ function emitGameStatus() {
     io.emit('gameStatus', { cardsToDraw, playDirection });
 }
 
+// Tell all clients how tall each pile is so they can draw the right number of layers
+function emitPileStatus() {
+    io.emit('pileStatus', { deckCount: deck.length, discardCount: discardPile.length });
+}
+
+// Everyone's remaining cards, sent at the end of a hand so players can see what was left
+function revealPayload() {
+    return Array.from(players.values()).map(p => ({ PlayerID: p.PlayerID, Hand: p.Hand }));
+}
+
 // Draw a fixed number of cards for a player, with a staggered delay between each
-function drawCards(SocketID, num) {
+// Options:
+//   paysStack:    these cards are the pending draw stack being paid out, so the stack is cleared.
+//                 Leave false for Quno penalties, which must not wipe a stack that is still pending.
+//   forcedBy:     [[playerName, count], ...] — who gets "forced" credit for these cards
+//   selfInflicted: the drawer caused this penalty themselves (counts as a self-own)
+function drawCards(SocketID, num, { paysStack = false, forcedBy = [], selfInflicted = false } = {}) {
     if (num <= 0) return Promise.resolve();
 
     const player = players.get(SocketID);
     if (!player) return Promise.resolve();
 
     const label = num === 1 ? ' card' : ' cards';
-    io.emit('logMessage', `${player.Name} drew ${num}${label}`);
+    logEvent(`${player.Name} drew ${num}${label}`);
 
-    cardsToDraw = 0;
-    stackType = null;
-    emitGameStatus();
+    recordDrawStats(players, player, num, forcedBy, selfInflicted);
+
+    if (paysStack) {
+        cardsToDraw = 0;
+        stackType = null;
+        stackContributions.clear();
+        emitGameStatus();
+    }
 
     io.to(SocketID).emit('notCalledUnoMe');
 
@@ -789,12 +931,21 @@ function autoDraw(SocketID) {
     if (!player) return Promise.resolve();
 
     return new Promise((resolve) => {
+        let drawn = 0; // cards drawn in this sequence
+
         const tryDraw = () => {
             if (!canPlay(SocketID, ['none'])) {
                 performDraw(player);
-                io.emit('logMessage', `${player.Name} drew 1 card`);
+                drawn++;
                 setTimeout(tryDraw, CARD_DRAW_DELAY_MS);
             } else {
+                // Log once, after the player has found a playable card
+                if (drawn > 0) {
+                    player.HandSearched += drawn;
+                    player.MatchSearched += drawn;
+                    logEvent(`${player.Name} drew ${drawn} ${drawn === 1 ? 'card' : 'cards'}`);
+                }
+
                 player.HasCalledUno = false;
                 io.to(SocketID).emit('notCalledUnoMe');
                 // Charge the draw time to this player's turn
@@ -831,11 +982,14 @@ function checkForWin(SocketID) {
         summary.handCardsPlayed = handCardsPlayed;
         summary.matchCardsPlayed = matchCardsPlayed;
 
+        lastHandSummary = summary; // keep for on-demand viewing
+
         gameIsOver = true;
         io.emit('turnChange', -1);
+        io.emit('revealHands', revealPayload());
         io.emit('handSummary', summary);
         io.emit('gameOver', winner.Name);
-        io.emit('logMessage', winner.Name + ' won the game');
+        logEvent(winner.Name + ' won the game');
     }
 }
 
@@ -858,6 +1012,7 @@ function discardCard(card, SocketID) {
     if (SocketID !== -1) {
         io.emit('removeOpponentCard', player.PlayerID);
     }
+    emitPileStatus();
 }
 
 // Clear the required-play list and stack state, and broadcast the update to all clients
@@ -920,6 +1075,7 @@ async function startGame() {
     playDirection = -1;
     cardsToDraw = 0;
     stackType = null;
+    stackContributions.clear();
     pendingSkipTarget = null;
     pendingWinnerSocketId = null;
     handStartTime = Date.now();
@@ -944,6 +1100,10 @@ async function startGame() {
         player.LastUnoYouTime = 0;
         player.WaitingForColorChoice = false;
         player.HandCardsPlayed = 0;
+        player.HandForced = 0;
+        player.HandReceived = 0;
+        player.HandSearched = 0;
+        player.HandSelfOwned = 0;
         player.HandTurnTime = 0;
         if(player.PlayerID == currentPlayerID) {
             currentPlayer = player.SocketID;
@@ -965,4 +1125,261 @@ async function startGame() {
 
     io.emit('turnChange', currentPlayerID);
     turnStartTime = Date.now();
+}
+
+// ── Admin tools ───────────────────────────────────────────────────────────────
+// A separate Socket.IO namespace (/admin) so the admin page never counts as a player
+// and never receives game broadcasts. The /admin page itself is only a login screen;
+// the password is checked here, when its socket connects.
+
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
+const adminNs = io.of('/admin');
+const adminFailures = new Map(); // ip → { count, lockedUntil }
+
+if (!ADMIN_PASSWORD) console.warn('ADMIN_PASSWORD is not set: the /admin page is disabled');
+
+function passwordMatches(supplied) {
+    if (!ADMIN_PASSWORD || typeof supplied !== 'string') return false;
+    const hash = s => crypto.createHash('sha256').update(s).digest();
+    return crypto.timingSafeEqual(hash(supplied), hash(ADMIN_PASSWORD));
+}
+
+const denied = msg => { const e = new Error(msg); e.data = { auth: true }; return e; };
+
+adminNs.use((socket, next) => {
+    const fwd = socket.handshake.headers['x-forwarded-for'];
+    const ip = fwd ? fwd.split(',')[0].trim() : socket.handshake.address;
+    const rec = adminFailures.get(ip) || { count: 0, lockedUntil: 0 };
+
+    if (Date.now() < rec.lockedUntil) return next(denied('Too many attempts. Try again in a minute.'));
+    if (passwordMatches(socket.handshake.auth && socket.handshake.auth.password)) {
+        adminFailures.delete(ip);
+        return next();
+    }
+    if (++rec.count >= 5) { rec.lockedUntil = Date.now() + 60000; rec.count = 0; }
+    adminFailures.set(ip, rec);
+    next(denied(ADMIN_PASSWORD ? 'Wrong password' : 'Admin is disabled (ADMIN_PASSWORD is not set)'));
+});
+
+adminNs.on('connection', (socket) => {
+    socket.emit('catalog', Array.from({ length: 112 }, (_, i) => buildCard(i)));
+    socket.emit('eventLog', eventLog);
+    socket.emit('state', buildAdminState());
+
+    socket.on('action', (type, payload, ack) => {
+        let result;
+        try { result = runAdminAction(type, payload || {}); }
+        catch (e) { result = { ok: false, msg: 'Error: ' + e.message }; }
+        if (result.ok) recordEvent('[admin] ' + result.msg);
+        if (typeof ack === 'function') ack(result);
+        adminNs.emit('state', buildAdminState());
+    });
+});
+
+// Push a fresh snapshot once a second while an admin page is open
+setInterval(() => {
+    if (adminNs.sockets.size > 0) adminNs.emit('state', buildAdminState());
+}, 1000);
+
+function buildAdminState() {
+    const sockets = io.sockets.sockets;
+    const nameOf = id => (players.get(id) || {}).Name || null;
+
+    return {
+        hostName,
+        game: {
+            hasMatch: players.size > 0,
+            gameIsOver,
+            currentPlayer: nameOf(currentPlayer),
+            currentColor, currentType, playDirection, cardsToDraw, stackType,
+            requiredPlay,
+            pendingSkipTarget: nameOf(pendingSkipTarget),
+            pendingWinner: nameOf(pendingWinnerSocketId),
+            deckCount: deck.length,
+            discardCount: discardPile.length,
+            topCard: discardPile.length ? discardPile[discardPile.length - 1] : null,
+            handsPlayed,
+        },
+        options: { playWildDraw4, stackDraw2, skipDraw2, reverseDraw2, skipSkip, stackDraw4, skipDraw4, reverseDraw4 },
+        players: Array.from(players.values())
+            .sort((a, b) => a.PlayerID - b.PlayerID)
+            .map(p => ({
+                name: p.Name, seat: p.PlayerID, points: p.Points, handsWon: p.HandsWon,
+                hand: p.Hand,
+                connected: sockets.has(p.SocketID),
+                isHost: p.SocketID === playerA,
+                isCurrent: p.SocketID === currentPlayer,
+                calledUno: p.HasCalledUno,
+                waitingForColor: p.WaitingForColorChoice,
+            })),
+        // Connected people who aren't seated in the current hand (lobby / waiting for next deal)
+        waiting: Array.from(sockets.values())
+            .filter(s => s.playerName && !players.has(s.id))
+            .map(s => ({ name: s.playerName, isHost: s.id === playerA })),
+    };
+}
+
+// Deal cards to a player without touching the draw stack (unlike drawCards)
+function adminDraw(player, num) {
+    logEvent(`${player.Name} drew ${num} ${num === 1 ? 'card' : 'cards'} (admin)`);
+    player.HasCalledUno = false;
+    io.to(player.SocketID).emit('notCalledUnoMe');
+    io.to(player.SocketID).emit('drawStart');
+    for (let i = 0; i < num; i++) {
+        setTimeout(() => {
+            performDraw(player);
+            if (i === num - 1) io.to(player.SocketID).emit('drawEnd');
+        }, i * CARD_DRAW_DELAY_MS);
+    }
+}
+
+// ── Event log (also shown on the admin page) ──
+const EVENT_LOG_MAX = 300;
+const eventLog = []; // { t: timestamp, msg }
+
+// Admin-only entry (not shown to players)
+function recordEvent(message) {
+    const entry = { t: Date.now(), msg: message };
+    eventLog.push(entry);
+    if (eventLog.length > EVENT_LOG_MAX) eventLog.shift();
+    adminNs.emit('logEvent', entry);
+}
+
+// Show a message in every player's log panel and keep a copy for the admin page
+function logEvent(message) {
+    io.emit('logMessage', message);
+    recordEvent(message);
+}
+
+function runAdminAction(type, p) {
+    const ok = msg => ({ ok: true, msg });
+    const fail = msg => ({ ok: false, msg });
+    const findSocket = name => Array.from(io.sockets.sockets.values()).find(s => s.playerName === name);
+    const findPlayer = name => Array.from(players.values()).find(pl => pl.Name === name);
+
+    switch (type) {
+        case 'setHost': {
+            const target = findSocket(p.name);
+            if (!target) return fail(p.name + ' is not connected');
+            if (target.id === playerA) return fail(p.name + ' is already the host');
+            assignHost(target);
+            return ok(p.name + ' is now the host');
+        }
+
+        case 'draw': {
+            const pl = findPlayer(p.name);
+            if (!pl) return fail(p.name + ' is not seated in the current hand');
+            if (gameIsOver) return fail('The hand is over');
+            const available = deck.length + Math.max(0, discardPile.length - 1);
+            const n = Math.min(Math.floor(Number(p.count)), 50, available);
+            if (!(n >= 1)) return fail('Enter a number of cards (1 or more)');
+            adminDraw(pl, n);
+            return ok(`${pl.Name} is drawing ${n} card${n === 1 ? '' : 's'}`);
+        }
+
+        case 'giveCard': {
+            const pl = findPlayer(p.name);
+            if (!pl) return fail(p.name + ' is not seated in the current hand');
+            const idx = deck.findIndex(c => c.ID === Number(p.cardId));
+            if (idx === -1) return fail('That card is not in the draw pile (it is in a hand or the discard pile)');
+            const [card] = deck.splice(idx, 1);
+            pl.Hand.push(card);
+            io.to(pl.SocketID).emit('renderCard', card, pl);
+            io.emit('renderOpponentCard', pl.PlayerID);
+            io.emit('cardDrawn');
+            emitPileStatus();
+            logEvent(`${pl.Name} was dealt a card (admin)`);
+            return ok(`Gave ${pl.Name} a ${card.Color} ${card.Type}`);
+        }
+
+        case 'setOptions': {
+            if (!Array.isArray(p.options)) return fail('Invalid options');
+            applyOptions(p.options, 'Admin');
+            return ok('Options updated');
+        }
+
+        case 'adjustScore': {
+            const pl = findPlayer(p.name);
+            if (!pl) return fail(p.name + ' is not seated in the current match');
+            const field = p.field === 'handsWon' ? 'HandsWon' : 'Points';
+            const label = field === 'HandsWon' ? 'hands won' : 'points';
+            const value = p.value === '' ? NaN : Math.round(Number(p.value));
+            if (!Number.isFinite(value)) return fail('Enter a number');
+            pl[field] = Math.max(0, p.mode === 'add' ? pl[field] + value : value);
+            io.emit('updateScore', pl.PlayerID, pl.Points, pl.HandsWon);
+            logEvent(`${pl.Name}'s ${label} changed to ${pl[field]} (admin)`);
+            return ok(`${pl.Name} now has ${pl[field]} ${label}`);
+        }
+
+        case 'removeCard': {
+            const pl = findPlayer(p.name);
+            if (!pl) return fail(p.name + ' is not seated in the current hand');
+            if (gameIsOver) return fail('The hand is over');
+            const idx = pl.Hand.findIndex(c => c.ID === Number(p.cardId));
+            if (idx === -1) return fail('That card is not in their hand');
+            if (pl.Hand.length <= 1) return fail("Can't remove a player's last card");
+            const [card] = pl.Hand.splice(idx, 1);
+            // Back into the draw pile at a random spot so the deck stays at 112 cards
+            deck.splice(Math.floor(Math.random() * (deck.length + 1)), 0, card);
+            io.to(pl.SocketID).emit('adminRemoveCard', card.ID);
+            io.emit('removeOpponentCard', pl.PlayerID);
+            emitPileStatus();
+            logEvent(`A card was removed from ${pl.Name}'s hand (admin)`);
+            return ok(`Removed a ${card.Color} ${card.Type} from ${pl.Name}`);
+        }
+
+        case 'refresh': {
+            const targets = p.name === '*'
+                ? Array.from(io.sockets.sockets.values())
+                : [findSocket(p.name)].filter(Boolean);
+            if (!targets.length) return fail('No connected players to refresh');
+            // adminRefresh stops the disconnect handler from moving the host role on
+            targets.forEach(s => { s.adminRefresh = true; s.emit('adminRefresh'); });
+            return ok(`Refreshing ${targets.length} page${targets.length === 1 ? '' : 's'}`);
+        }
+
+        case 'newMatch':
+            return startNewMatch() ? ok('New match started') : fail('Need at least 2 connected players');
+
+        case 'newHand':
+            if (players.size < 2) return fail('Start a match first');
+            dealNewHand();
+            return ok('New hand dealt');
+
+        case 'nextTurn': {
+            if (gameIsOver || !players.get(currentPlayer)) return fail('No hand is in progress');
+            // If a win was waiting on a draw card's effect, finish it instead of skipping
+            resolvePendingWin();
+            if (gameIsOver) return ok('A pending win was resolved; the hand is over');
+            // Throw away any half-resolved effect, then advance
+            cardsToDraw = 0;
+            stackContributions.clear();
+            pendingSkipTarget = null;
+            players.forEach(pl => { pl.WaitingForColorChoice = false; });
+            emitGameStatus();
+            nextTurn(); // also clears requiredPlay and stackType
+            logEvent('The admin skipped to the next turn');
+            return ok('Advanced to the next turn');
+        }
+
+        case 'boot': {
+            const sock = findSocket(p.name);
+            const entry = findPlayer(p.name);
+            if (!sock && !entry) return fail(p.name + ' not found');
+            const targetId = sock ? sock.id : entry.SocketID;
+            if (targetId === playerA) promoteNextHost(targetId);
+            bootPlayerByName(p.name);
+            return ok(p.name + ' was booted');
+        }
+
+        case 'broadcast': {
+            const text = String(p.text || '').trim().slice(0, 200).replace(/</g, '&lt;');
+            if (!text) return fail('Type a message first');
+            logEvent('Admin: ' + text);
+            return ok('Message sent');
+        }
+
+        default:
+            return fail('Unknown action: ' + type);
+    }
 }

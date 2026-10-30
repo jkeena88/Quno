@@ -26,11 +26,13 @@
                     <input type="button" id="btnStart" class="game-btn" value="Start New Match" onclick="showResetConfirm()">
                     <input type="button" id="btnDeal" class="game-btn" value="Deal New Hand" onclick="newHand()">
                     <input type="button" id="btnJoin" class="game-btn" value="Join" onclick="joinGame()">
+                    <input type="button" id="btnStats" class="game-btn" value="Stats" onclick="requestStats()">
                 </div>
 
                 <div id="options">
                     <div id="options-container">
                         <div id="left-options">
+                            <p id="optionsReadOnlyNote" class="options-note">Only the host can change options.</p>
                             <label><input type="checkbox" id="masterCheckbox" name="mattMode" value="mattMode">Matt Mode (maximum chaos)</label>
                             <hr>
                             <label><input type="checkbox" class="controlledCheckbox" name="playWildDraw4" value="playWildDraw4">Play Wild Draw 4 any time</label>
@@ -84,8 +86,8 @@
                 </div>
 
                 <div id="uno-buttons" class="uno-buttons">
-                    <input type="button" id="btnUnoMe" class="btn" value="Call Uno For Me" onclick="unoMe()">
-                    <input type="button" id="btnUnoYou" class="btn" value="Call Uno On Another" onclick="unoYou()">
+                    <input type="button" id="btnUnoMe" class="btn" value="Call Quno For Me" onclick="unoMe()">
+                    <input type="button" id="btnUnoYou" class="btn" value="Call Quno On Another" onclick="unoYou()">
                 </div>
                 
                 <div id="waitingOverlay" class="overlay">Waiting for the host to start the game</div>
