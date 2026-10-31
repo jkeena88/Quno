@@ -859,10 +859,23 @@ hr {
 
 .message:nth-child(odd) { background-color: var(--bg-panel); }
 
+/* Let the log fill the remaining side-panel height and scroll inside it */
+.log-panel {
+    flex: 1;
+    min-height: 0;          /* allows the flex child to shrink below its content height */
+    display: flex;
+    flex-direction: column;
+}
+
+.log-panel h3 {
+    flex-shrink: 0;
+}
+
 #message-container {
     border-left: 1px solid var(--border-subtle);
     overflow-y: auto;
     flex: 1;
+    min-height: 0;
     background-color: var(--bg-surface);
 }
 
