@@ -51,9 +51,22 @@
     .opts { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 6px 14px; margin-bottom: 10px; }
     .opts label { display: flex; align-items: center; gap: 8px; cursor: pointer; }
     #eventLog { max-height: 260px; overflow-y: auto; font: 12px/1.5 ui-monospace, Consolas, monospace; }
-    #eventLog div { padding: 2px 0; border-bottom: 1px solid var(--line); }
-    #eventLog .time { color: var(--muted); margin-right: 8px; }
-    #eventLog .admin { color: #93c5fd; }
+    #eventLog .ev { display: flex; gap: 8px; padding: 3px 8px; background: var(--cat); border-bottom: 1px solid var(--bg); }
+    #eventLog .ev.play { --cat: #085041; } #eventLog .ev.draw { --cat: #633806; }
+    #eventLog .ev.quno { --cat: #3C3489; } #eventLog .ev.room { --cat: #2f3136; }
+    #eventLog .ev.admin .tx { color: #93c5fd; }
+    #eventLog .time { color: var(--muted); flex: none; }
+    #eventLog .a-pill { padding: 0 7px; border-radius: 999px; border: 2px solid var(--pill); background: var(--panel); font-weight: 700; }
+    #eventLog .ev-div { display: flex; align-items: center; gap: 8px; padding: 6px 8px; font-size: 11px; color: var(--muted); }
+    #eventLog .ev-div::before, #eventLog .ev-div::after { content: ''; flex: 1; border-top: 1px solid var(--line); }
+    #eventLog .ev-div.match { color: var(--text); font-weight: 700; padding: 9px 8px; }
+    #eventLog .ev-div.match::before, #eventLog .ev-div.match::after { border-top: 2px solid #555; }
+    #eventLog.hide-play .ev.play, #eventLog.hide-draw .ev.draw,
+    #eventLog.hide-quno .ev.quno, #eventLog.hide-room .ev.room { display: none; }
+    .f-chip { padding: 2px 10px; border-radius: 999px; font-size: 12px; display: inline-flex; align-items: center; gap: 6px; }
+    .f-chip i { width: 8px; height: 8px; border-radius: 50%; background: var(--dot); display: inline-block; }
+    .f-chip[aria-pressed="false"] { color: var(--muted); border-style: dashed; }
+    .f-chip[aria-pressed="false"] i { background: transparent; border: 1px solid var(--muted); }
     #toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); padding: 8px 16px;
              border-radius: 8px; opacity: 0; transition: opacity .2s; pointer-events: none; }
     #toast.show { opacity: 1; }
@@ -140,6 +153,12 @@
 
         <section class="panel">
             <h2>Event log</h2>
+            <div class="bar" id="logFilters">
+                <button class="f-chip" data-cat="play" aria-pressed="true" style="--dot:#1D9E75"><i></i>Play</button>
+                <button class="f-chip" data-cat="draw" aria-pressed="true" style="--dot:#BA7517"><i></i>Draw</button>
+                <button class="f-chip" data-cat="quno" aria-pressed="true" style="--dot:#7F77DD"><i></i>Quno</button>
+                <button class="f-chip" data-cat="room" aria-pressed="true" style="--dot:#888780"><i></i>Table &amp; room</button>
+            </div>
             <div id="eventLog"></div>
         </section>
     </main>
@@ -385,11 +404,37 @@ $('scoreAddBtn').onclick = () => needSelected() && act('adjustScore', scorePaylo
 
 const MAX_LOG_ROWS = 300;
 
-function logRow(entry) {
-    const time = new Date(entry.t).toLocaleTimeString([], { hour12: false });
-    const cls = entry.msg.startsWith('[admin]') ? ' class="admin"' : '';
-    return `<div${cls}><span class="time">${time}</span>${esc(entry.msg)}</div>`;
+const LOG_TYPES = ['play', 'draw', 'quno', 'room'];
+const PILL = { red: '#e8342a', yellow: '#FFAA01', green: '#3a9e3a', blue: '#4545ff', black: '#8a8780' };
+
+function cardLabel(color, type) {
+    const t = { draw2: 'draw 2', draw4: 'draw 4' }[type] ?? type;
+    return color === 'black' ? String(t) : color + ' ' + t;
 }
+const partText = p => typeof p === 'string' ? p : (p.card ? cardLabel(p.card.color, p.card.type) : String(p.color));
+function partHtml(p) {
+    if (typeof p === 'string') return esc(p);
+    const color = p.card ? p.card.color : p.color;
+    return PILL[color] ? `<span class="a-pill" style="--pill:${PILL[color]}">${esc(partText(p))}</span>` : esc(partText(p));
+}
+
+function logRow(entry) {
+    const d = new Date(entry.t);
+    const time = d.toLocaleTimeString([], { hour12: false });
+    const tip = esc(d.toLocaleString());
+    if (entry.type === 'divider') {
+        return `<div class="ev-div ${entry.level === 'match' ? 'match' : 'hand'}" title="${tip}">${esc(entry.parts.join(''))}</div>`;
+    }
+    const cat = LOG_TYPES.includes(entry.type) ? entry.type : 'room';
+    const isAdmin = entry.parts.map(partText).join('').startsWith('[admin]');
+    return `<div class="ev ${cat}${isAdmin ? ' admin' : ''}" title="${tip}"><span class="time">${time}</span><span class="tx">${entry.parts.map(partHtml).join('')}</span></div>`;
+}
+
+document.querySelectorAll('#logFilters .f-chip').forEach(chip => chip.addEventListener('click', () => {
+    const off = chip.getAttribute('aria-pressed') === 'true';
+    chip.setAttribute('aria-pressed', String(!off));
+    $('eventLog').classList.toggle('hide-' + chip.dataset.cat, off);
+}));
 
 // ── Start: reuse the password for this browser tab so a reload doesn't ask again ──
 

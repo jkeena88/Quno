@@ -92,10 +92,6 @@
     outline-color: var(--player-active-outline);
 }
 
-[data-theme="dark"] .message:nth-child(odd) {
-    background-color: rgba(255,255,255,0.025);
-}
-
 [data-theme="dark"] #message-container {
     background-color: var(--bg-surface);
 }
@@ -857,8 +853,6 @@ hr {
     line-height: 1.5;
 }
 
-.message:nth-child(odd) { background-color: var(--bg-panel); }
-
 /* Let the log fill the remaining side-panel height and scroll inside it */
 .log-panel {
     flex: 1;
@@ -1070,3 +1064,113 @@ hr {
 #options.readonly #left-options input[type="checkbox"] {
     cursor: not-allowed;
 }
+
+/* ── Log: category tints, pills, dividers, filters ── */
+:root {
+    --log-play-bg: #E1F5EE; --log-play-edge: #1D9E75;
+    --log-draw-bg: #FAEEDA; --log-draw-edge: #BA7517;
+    --log-quno-bg: #EEEDFE; --log-quno-edge: #7F77DD;
+    --log-room-bg: #F1EFE8; --log-room-edge: #888780;
+}
+[data-theme="dark"] {
+    --log-play-bg: #085041;
+    --log-draw-bg: #633806;
+    --log-quno-bg: #3C3489;
+    --log-room-bg: #444441;
+}
+
+.log-play { --log-bg: var(--log-play-bg); --log-edge: var(--log-play-edge); }
+.log-draw { --log-bg: var(--log-draw-bg); --log-edge: var(--log-draw-edge); }
+.log-quno { --log-bg: var(--log-quno-bg); --log-edge: var(--log-quno-edge); }
+.log-room { --log-bg: var(--log-room-bg); --log-edge: var(--log-room-edge); }
+
+.message[data-cat] {
+    background: var(--log-bg);
+    color: var(--text-primary);
+    border-bottom: 1px solid var(--bg-surface);
+}
+
+.log-entry { display: flex; align-items: flex-start; gap: 8px; }
+.log-icon  { flex: none; width: 1.3em; text-align: center; }
+.log-text  { flex: 1; min-width: 0; }
+
+.message.affects-you {
+    font-weight: 500;
+    outline: 1.5px solid var(--log-edge);
+    outline-offset: -1.5px;
+}
+
+.log-you-tag {
+    flex: none;
+    font-size: 11px;
+    font-weight: 500;
+    padding: 0 7px;
+    border-radius: 999px;
+    background: rgba(59, 130, 246, 0.18);
+    color: var(--btn-active-bg);
+}
+
+/* Card and color pills: neutral fill, colored outline, so contrast never depends on the row tint */
+.log-pill {
+    display: inline-block;
+    padding: 0 8px;
+    margin: 0 1px;
+    border-radius: 999px;
+    border: 2px solid var(--pill);
+    background: var(--bg-surface);
+    color: var(--text-primary);
+    font-weight: 600;
+    font-size: 12px;
+    line-height: 1.5;
+}
+.log-pill-red    { --pill: #e8342a; }
+.log-pill-yellow { --pill: #FFAA01; }
+.log-pill-green  { --pill: #3a9e3a; }
+.log-pill-blue   { --pill: #4545ff; }
+.log-pill-black  { --pill: #2C2C2A; }
+[data-theme="dark"] .log-pill-black { --pill: #8a8780; }
+
+/* Dividers between hands (light) and matches (heavy) */
+.log-divider {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 12px;
+    font-size: 11px;
+    color: var(--text-secondary);
+}
+.log-divider::before, .log-divider::after {
+    content: '';
+    flex: 1;
+    border-top: 1px solid var(--border-medium);
+}
+.log-divider-match { padding: 12px; font-weight: 600; color: var(--text-primary); }
+.log-divider-match::before, .log-divider-match::after { border-top-width: 2px; }
+
+/* Filter chips */
+.log-filters { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 8px 8px 0; flex-shrink: 0; }
+.log-chip {
+    font: inherit;
+    font-size: 12px;
+    padding: 3px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--border-medium);
+    background: transparent;
+    color: var(--text-primary);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+.log-chip-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dot); }
+.log-chip[data-cat="play"] { --dot: var(--log-play-edge); }
+.log-chip[data-cat="draw"] { --dot: var(--log-draw-edge); }
+.log-chip[data-cat="quno"] { --dot: var(--log-quno-edge); }
+.log-chip[data-cat="room"] { --dot: var(--log-room-edge); }
+.log-chip[aria-pressed="false"] { color: var(--text-muted); border-style: dashed; }
+.log-chip[aria-pressed="false"] .log-chip-dot { background: transparent; border: 1px solid var(--text-muted); }
+
+#message-container.hide-play .log-play,
+#message-container.hide-draw .log-draw,
+#message-container.hide-quno .log-quno,
+#message-container.hide-room .log-room { display: none; }

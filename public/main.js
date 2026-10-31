@@ -514,38 +514,85 @@ socket.on('drawEnd', function() {
     }
 });
 
-// Append a message to the game log, colorizing any color names found in the text
-socket.on('logMessage', function(message) {
-    const messageContainer = document.getElementById('message-container');
-    const messageElement = document.createElement('div');
-    messageElement.classList.add('message');
+// ── Game log ──
+const LOG_TYPES = {
+    play: { icon: '🃏' },
+    draw: { icon: '📥' },
+    quno: { icon: '📣' },
+    room: { icon: '🎲' },
+};
+const PILL_COLORS = ['red', 'yellow', 'green', 'blue', 'black'];
 
-    const colors = {
-        red: '#FF5555',
-        yellow: '#FFAA01',
-        green: '#55AA55',
-        blue: '#5455FF',
-        black: '#a0a0a0'
-    };
-    let formattedMessage = message;
+function cardLabel(color, type) {
+    const t = { draw2: 'draw 2', draw4: 'draw 4' }[type] ?? type;
+    return color === 'black' ? String(t) : color + ' ' + t;
+}
 
-    for (const [color, hex] of Object.entries(colors)) {
-        const regex = new RegExp(`\\b${color}\\b`, 'gi');
-        formattedMessage = formattedMessage.replace(
-            regex,
-            `<span style="color: ${hex}; font-weight: bold;">${color}</span>`
-        );
+// Parts are plain strings or { card } / { color }. Everything goes in via textContent,
+// so player names are never parsed as HTML and never colored.
+function buildLogPart(part) {
+    if (typeof part === 'string') return document.createTextNode(part);
+    const color = part.card ? part.card.color : part.color;
+    const label = part.card ? cardLabel(part.card.color, part.card.type) : part.color;
+    const span = document.createElement('span');
+    span.textContent = label;
+    if (PILL_COLORS.includes(color)) span.className = 'log-pill log-pill-' + color;
+    return span;
+}
+
+socket.on('logMessage', function(entry) {
+    const container = document.getElementById('message-container');
+    const el = document.createElement('div');
+    el.title = new Date(entry.t).toLocaleTimeString();
+
+    if (entry.type === 'divider') {
+        el.className = 'log-divider log-divider-' + (entry.level === 'match' ? 'match' : 'hand');
+        el.textContent = entry.parts.join('');
+        container.insertBefore(el, container.firstChild);
+        return;
     }
 
-    messageElement.innerHTML = formattedMessage;
-    messageContainer.insertBefore(messageElement, messageContainer.firstChild);
+    const type = LOG_TYPES[entry.type] ? entry.type : 'room';
+    el.className = 'message log-entry log-' + type;
+    el.dataset.cat = type;
+
+    const icon = document.createElement('span');
+    icon.className = 'log-icon';
+    icon.textContent = LOG_TYPES[type].icon;
+
+    const text = document.createElement('span');
+    text.className = 'log-text';
+    entry.parts.forEach(p => text.appendChild(buildLogPart(p)));
+
+    el.append(icon, text);
+
+    if ((entry.affects || []).includes(playerName)) {
+        el.classList.add('affects-you');
+        const tag = document.createElement('span');
+        tag.className = 'log-you-tag';
+        tag.textContent = 'you';
+        el.appendChild(tag);
+    }
+
+    container.insertBefore(el, container.firstChild);
+});
+
+// Filter chips: hide or show a category by toggling a class on the container
+document.querySelectorAll('#log-filters .log-chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+        const turningOff = chip.getAttribute('aria-pressed') === 'true';
+        chip.setAttribute('aria-pressed', String(!turningOff));
+        document.getElementById('message-container').classList.toggle('hide-' + chip.dataset.cat, turningOff);
+    });
 });
 
 // Display a rich log entry when the host changes game options
 socket.on('optionsChanged', function({ changedBy, options, labels }) {
     const messageContainer = document.getElementById('message-container');
     const el = document.createElement('div');
-    el.classList.add('message');
+    el.classList.add('message', 'log-room');
+    el.dataset.cat = 'room';
+    el.title = new Date().toLocaleTimeString();
 
     const rows = Object.entries(labels).map(([key, label]) => {
         const on = !!options[key];

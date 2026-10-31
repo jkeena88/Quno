@@ -128,7 +128,7 @@ function onConnection(socket) {
                 players.delete(disconnectedId);
                 io.emit('playerLeft', { playerName: disconnectedName, playerId: leavingPlayerId });
                 io.emit('newPlayer', { players: playersInLobby, host: hostName });
-                logEvent(disconnectedName + ' left the game');
+                logEvent(disconnectedName + ' left the game', 'room', [disconnectedName]);
 
                 if (disconnectedId === currentPlayer && !gameIsOver) {
                     nextTurn();
@@ -202,7 +202,7 @@ function onConnection(socket) {
                 io.to(socket.id).emit('revealHands', revealPayload());
             }
             io.emit('newPlayer', { players: playersInLobby, host: hostName });
-            logEvent(playerName + ' rejoined the game');
+            logEvent(playerName + ' rejoined the game', 'room', [playerName]);
             io.to(socket.id).emit('updateOptions', { playWildDraw4, stackDraw2, skipDraw2, reverseDraw2, skipSkip, stackDraw4, skipDraw4, reverseDraw4 });
             if (socket.id === playerA) {
                 io.to(socket.id).emit('isPlayerA', { gameInProgress: !gameIsOver });
@@ -228,7 +228,7 @@ function onConnection(socket) {
             (playersInLobby.length >= maxPlayers || waitingList.length > 0)) {
             if (!waitingList.includes(socket.id)) waitingList.push(socket.id);
             io.to(socket.id).emit('roomFull', { position: waitingList.indexOf(socket.id) + 1, maxPlayers });
-            logEvent(playerName + ' is waiting for a seat (the game is full)');
+            logEvent(playerName + ' is waiting for a seat (the game is full)', 'room', [playerName]);
             return;
         }
 
@@ -238,9 +238,9 @@ function onConnection(socket) {
         }
         io.to(socket.id).emit('responseRoom', [playersInLobby.length, maxPlayers]);
         io.emit('newPlayer', {players: playersInLobby, host: hostName});
-        logEvent(playerName + ' joined the game');
+        logEvent(playerName + ' joined the game', 'room', [playerName]);
         if (becameHost) {
-            logEvent(playerName + ' is now the host');
+            logEvent(playerName + ' is now the host', 'room', [playerName]);
         }
 
         // If a hand is currently in progress, hold this player in a pending queue
@@ -302,7 +302,7 @@ function onConnection(socket) {
                 io.to(currentPlayer).emit('requiredPlay', requiredPlay);
                 discardCard(card, socket.id);
                 io.emit('hideColor');
-                logEvent(socket.playerName + ' played a ' + playColor + ' ' + playType);
+                logEvent([socket.playerName, ' played a ', cardPart(playColor, playType)], 'play', [socket.playerName]);
 
                 // Defer the win check for draw/skip/reverse cards — the effect still needs to resolve
                 const isDeferredWin = (playType === 'draw2' || playType === 'draw4') ||
@@ -401,7 +401,7 @@ function onConnection(socket) {
 
         currentColor = color;
         io.emit('colorChosen', color);
-        logEvent('The color was changed to ' + color);
+        logEvent(['The color was changed to ', colorPart(color)], 'play', [player.Name]);
 
         if(cardsToDraw > 0) {
             // Wild Draw 4 was just played — advance and offer the stack
@@ -434,7 +434,7 @@ function onConnection(socket) {
         // Valid call: it's their turn with ≤2 cards, or they're down to 1 card on any turn
         if((player.Hand.length <= 2 && socket.id == currentPlayer) || player.Hand.length == 1) {
             if (!player.HasCalledUno) {
-                logEvent(socket.playerName + ' called Quno');
+                logEvent(socket.playerName + ' called Quno', 'quno', [socket.playerName]);
                 player.HasCalledUno = true;
             }
         } else {
@@ -442,7 +442,7 @@ function onConnection(socket) {
             const recentlyGotUnoYou = player.LastUnoYouTime && (now - player.LastUnoYouTime < GRACE_MS);
 
             if (!recentlyGotUnoYou) {
-                logEvent(socket.playerName + ' called Quno at the wrong time - oops!');
+                logEvent(socket.playerName + ' called Quno at the wrong time - oops!', 'quno', [socket.playerName]);
                 drawCards(socket.id, 2, { selfInflicted: true });
                 io.to(socket.id).emit('calledUnoMe');
             }
@@ -469,7 +469,7 @@ function onConnection(socket) {
 
             // Catch any player who has 1 card and hasn't called Uno (and didn't just call it)
             if(player.Hand.length == 1 && !player.HasCalledUno && !recentlyCalledUnoMe) {
-                logEvent(socket.playerName + ' called Quno at the wrong time - oops!');
+                logEvent(`${caller.Name} caught ${player.Name} without a Quno call`, 'quno', [caller.Name, player.Name]);
                 drawCards(player.SocketID, 4, { forcedBy: [[caller.Name, 4]] });
                 player.LastUnoYouTime = Date.now();
             };
@@ -524,7 +524,7 @@ function assignHost(targetSocket) {
     io.to(playerA).emit('updateOptions', { playWildDraw4, stackDraw2, skipDraw2, reverseDraw2, skipSkip, stackDraw4, skipDraw4, reverseDraw4 });
     io.emit('setHost', hostName);
     io.emit('newPlayer', { players: playersInLobby, host: hostName });
-    logEvent(hostName + ' is now the host');
+    logEvent(hostName + ' is now the host', 'room', [hostName]);
 }
 
 function promoteNextHost(excludeId) {
@@ -551,7 +551,7 @@ function promoteWaiting() {
         playersInLobby.push(s.playerName);
         if (players.size > 0) pendingPlayers.push(id); // absorbed by dealNewHand
         io.to(id).emit('roomJoined');
-        logEvent(s.playerName + ' joined the game');
+        logEvent(s.playerName + ' joined the game', 'room', [s.playerName]);
         promoted = true;
     }
     if (promoted) io.emit('newPlayer', { players: playersInLobby, host: hostName });
@@ -567,7 +567,7 @@ function startNewMatch() {
     matchCardsPlayed = 0;
     pendingPlayers = [];
     lastHandSummary = null;
-    logEvent('A new match was started');
+    logDivider('match', 'New match started');
     createPlayers();
     startGame();
     return true;
@@ -615,12 +615,12 @@ function dealNewHand() {
                 WaitingForColorChoice: false
             };
             players.set(pendingSocketId, player);
-            logEvent(pendingSocket.playerName + ' joined the game');
+            logEvent(pendingSocket.playerName + ' joined the game', 'room', [pendingSocket.playerName]);
         });
         pendingPlayers = [];
     }
 
-    logEvent('A new hand was dealt');
+    logDivider('hand', 'New hand dealt');
     reshuffleSeats();
     startGame();
 }
@@ -659,13 +659,13 @@ function bootPlayerByName(targetName) {
         io.emit('playerLeft', { playerName: targetName, playerId: leavingPlayerId });
         io.emit('setHost', hostName);
         io.emit('newPlayer', { players: playersInLobby, host: hostName });
-        logEvent(targetName + ' was booted by the host');
+        logEvent(targetName + ' was booted by the host', 'room', [targetName]);
 
         // End the game if too few players remain to continue
         if (players.size <= 1) {
             gameIsOver = true;
             io.emit('turnChange', -1);
-            logEvent('Game over — not enough players to continue');
+            logEvent('Game over — not enough players to continue', 'room', []);
         }
     }
 
@@ -679,7 +679,7 @@ function bootPlayerByName(targetName) {
         io.emit('newPlayer', { players: playersInLobby, host: hostName });
         waitingList = waitingList.filter(id => id !== targetSocket.id);
         if (players.size === 0) promoteWaiting();
-        logEvent(targetName + ' was booted');
+        logEvent(targetName + ' was booted', 'room', [targetName]);
     }
 }
 
@@ -896,7 +896,7 @@ function drawCards(SocketID, num, { paysStack = false, forcedBy = [], selfInflic
     if (!player) return Promise.resolve();
 
     const label = num === 1 ? ' card' : ' cards';
-    logEvent(`${player.Name} drew ${num}${label}`);
+    logEvent(`${player.Name} drew ${num}${label}`, 'draw', [player.Name]);
 
     recordDrawStats(players, player, num, forcedBy, selfInflicted);
 
@@ -943,7 +943,7 @@ function autoDraw(SocketID) {
                 if (drawn > 0) {
                     player.HandSearched += drawn;
                     player.MatchSearched += drawn;
-                    logEvent(`${player.Name} drew ${drawn} ${drawn === 1 ? 'card' : 'cards'}`);
+                    logEvent(`${player.Name} drew ${drawn} ${drawn === 1 ? 'card' : 'cards'}`, 'draw', [player.Name]);
                 }
 
                 player.HasCalledUno = false;
@@ -989,7 +989,7 @@ function checkForWin(SocketID) {
         io.emit('revealHands', revealPayload());
         io.emit('handSummary', summary);
         io.emit('gameOver', winner.Name);
-        logEvent(winner.Name + ' won the game');
+        logEvent(winner.Name + ' won the game', 'room', [winner.Name]);
     }
 }
 
@@ -1221,7 +1221,7 @@ function buildAdminState() {
 
 // Deal cards to a player without touching the draw stack (unlike drawCards)
 function adminDraw(player, num) {
-    logEvent(`${player.Name} drew ${num} ${num === 1 ? 'card' : 'cards'} (admin)`);
+    logEvent(`${player.Name} drew ${num} ${num === 1 ? 'card' : 'cards'} (admin)`, 'draw', [player.Name]);
     player.HasCalledUno = false;
     io.to(player.SocketID).emit('notCalledUnoMe');
     io.to(player.SocketID).emit('drawStart');
@@ -1235,20 +1235,38 @@ function adminDraw(player, num) {
 
 // ── Event log (also shown on the admin page) ──
 const EVENT_LOG_MAX = 300;
-const eventLog = []; // { t: timestamp, msg }
+const eventLog = []; // { t, type, parts, affects, level? }
 
-// Admin-only entry (not shown to players)
-function recordEvent(message) {
-    const entry = { t: Date.now(), msg: message };
+// Parts that clients draw as card / color pills instead of plain text
+const cardPart  = (color, type) => ({ card: { color, type } });
+const colorPart = color => ({ color });
+
+function pushEvent(entry) {
     eventLog.push(entry);
     if (eventLog.length > EVENT_LOG_MAX) eventLog.shift();
     adminNs.emit('logEvent', entry);
 }
 
-// Show a message in every player's log panel and keep a copy for the admin page
-function logEvent(message) {
-    io.emit('logMessage', message);
-    recordEvent(message);
+// Admin-only entry (not shown to players)
+function recordEvent(message, type = 'room') {
+    pushEvent({ t: Date.now(), type, parts: [message], affects: [] });
+}
+
+// Show an entry in every player's log panel and keep a copy for the admin page.
+//   message: a string, or an array of parts (strings, cardPart(), colorPart())
+//   type:    'play' | 'draw' | 'quno' | 'room' (default)
+//   affects: names of the players the entry concerns; their clients highlight the row
+function logEvent(message, type = 'room', affects = []) {
+    const entry = { t: Date.now(), type, parts: Array.isArray(message) ? message : [message], affects };
+    io.emit('logMessage', entry);
+    pushEvent(entry);
+}
+
+// A full-width separator between hands ('hand') or matches ('match')
+function logDivider(level, label) {
+    const entry = { t: Date.now(), type: 'divider', level, parts: [label], affects: [] };
+    io.emit('logMessage', entry);
+    pushEvent(entry);
 }
 
 function runAdminAction(type, p) {
@@ -1288,7 +1306,7 @@ function runAdminAction(type, p) {
             io.emit('renderOpponentCard', pl.PlayerID);
             io.emit('cardDrawn');
             emitPileStatus();
-            logEvent(`${pl.Name} was dealt a card (admin)`);
+            logEvent(`${pl.Name} was dealt a card (admin)`, 'draw', [pl.Name]);
             return ok(`Gave ${pl.Name} a ${card.Color} ${card.Type}`);
         }
 
@@ -1307,7 +1325,7 @@ function runAdminAction(type, p) {
             if (!Number.isFinite(value)) return fail('Enter a number');
             pl[field] = Math.max(0, p.mode === 'add' ? pl[field] + value : value);
             io.emit('updateScore', pl.PlayerID, pl.Points, pl.HandsWon);
-            logEvent(`${pl.Name}'s ${label} changed to ${pl[field]} (admin)`);
+            logEvent(`${pl.Name}'s ${label} changed to ${pl[field]} (admin)`, 'room', [pl.Name]);
             return ok(`${pl.Name} now has ${pl[field]} ${label}`);
         }
 
@@ -1324,7 +1342,7 @@ function runAdminAction(type, p) {
             io.to(pl.SocketID).emit('adminRemoveCard', card.ID);
             io.emit('removeOpponentCard', pl.PlayerID);
             emitPileStatus();
-            logEvent(`A card was removed from ${pl.Name}'s hand (admin)`);
+            logEvent(`A card was removed from ${pl.Name}'s hand (admin)`, 'room', [pl.Name]);
             return ok(`Removed a ${card.Color} ${card.Type} from ${pl.Name}`);
         }
 
@@ -1358,7 +1376,7 @@ function runAdminAction(type, p) {
             players.forEach(pl => { pl.WaitingForColorChoice = false; });
             emitGameStatus();
             nextTurn(); // also clears requiredPlay and stackType
-            logEvent('The admin skipped to the next turn');
+            logEvent('The admin skipped to the next turn', 'room', []);
             return ok('Advanced to the next turn');
         }
 
@@ -1373,9 +1391,9 @@ function runAdminAction(type, p) {
         }
 
         case 'broadcast': {
-            const text = String(p.text || '').trim().slice(0, 200).replace(/</g, '&lt;');
+            const text = String(p.text || '').trim().slice(0, 200);
             if (!text) return fail('Type a message first');
-            logEvent('Admin: ' + text);
+            logEvent('Admin: ' + text, 'room', []);
             return ok('Message sent');
         }
 

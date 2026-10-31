@@ -123,11 +123,15 @@
             </div>
             <hr></hr>
             <div class="panel-container log-panel">
-            <h3>Messages:</h3>
-            <div id="message-container">
-
-
-            </div></div>
+                <h3>Messages:</h3>
+                <div class="log-filters" id="log-filters">
+                    <button type="button" class="log-chip" data-cat="play" aria-pressed="true"><i class="log-chip-dot"></i>Play</button>
+                    <button type="button" class="log-chip" data-cat="draw" aria-pressed="true"><i class="log-chip-dot"></i>Draw</button>
+                    <button type="button" class="log-chip" data-cat="quno" aria-pressed="true"><i class="log-chip-dot"></i>Quno</button>
+                    <button type="button" class="log-chip" data-cat="room" aria-pressed="true"><i class="log-chip-dot"></i>Table &amp; room</button>
+                </div>
+                <div id="message-container"></div>
+            </div>
 
         </div>
 
