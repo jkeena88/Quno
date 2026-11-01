@@ -406,6 +406,37 @@ socket.on('notCalledUnoMe', () => setUnoButtonState('btnUnoMe', false));
 socket.on('calledUnoYou',   () => setUnoButtonState('btnUnoYou', true));
 socket.on('notCalledUnoYou',() => setUnoButtonState('btnUnoYou', false));
 
+// ── Quno call bubble ──
+// Briefly shows a speech bubble over the caller's panel (visible to everyone):
+//   ✓ Quno!          called for themselves, valid
+//   ✕ Quno?          called for themselves at the wrong time
+//   ✕ Quno!  (struck) called for themselves, but someone else got there first
+//   ✓ Quno on Sam!   caught Sam
+//   ✕ Quno on Sam (struck) Sam had already called or been caught
+socket.on('qunoCall', function({ playerId: callerId, kind, result, targets }) {
+    const panel = document.getElementById('player_' + callerId);
+    if (!panel) return;
+    panel.querySelectorAll('.quno-bubble').forEach(b => b.remove());
+
+    const word = kind === 'other' ? 'Quno on ' + targets.join(' & ') : 'Quno';
+    const mark = result === 'invalid' ? '?' : (kind === 'other' && result === 'late' ? '' : '!');
+
+    const bubble = document.createElement('div');
+    bubble.className = 'quno-bubble qb-' + result;
+    bubble.setAttribute('role', 'status');
+
+    // Names go in via textContent, so they are never parsed as HTML
+    const icon = document.createElement('span');
+    icon.textContent = result === 'ok' ? '✓' : '✕';
+    const label = document.createElement('span');
+    label.textContent = word + mark;
+    if (result === 'late') label.classList.add('qb-struck');
+
+    bubble.append(icon, label);
+    panel.appendChild(bubble);
+    bubble.addEventListener('animationend', () => bubble.remove());
+});
+
 socket.on('updateScore', function(player, points, handsWon) {
     document.getElementById('points_' + player).innerHTML = 'Points: ' + points;
     document.getElementById('handsWon_' + player).innerHTML = 'Hands Won: ' + handsWon;

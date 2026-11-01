@@ -431,20 +431,27 @@ function onConnection(socket) {
 
         player.LastUnoMeTime = Date.now();
 
+        // Someone else already caught this player a moment ago, so their own call is too late
+        const recentlyGotUnoYou = player.LastUnoYouTime && (now - player.LastUnoYouTime < GRACE_MS);
+
         // Valid call: it's their turn with ≤2 cards, or they're down to 1 card on any turn
         if((player.Hand.length <= 2 && socket.id == currentPlayer) || player.Hand.length == 1) {
-            if (!player.HasCalledUno) {
+            if (recentlyGotUnoYou) {
+                emitQunoCall(player, 'self', 'late');
+            } else if (!player.HasCalledUno) {
                 logEvent(socket.playerName + ' called Quno', 'quno', [socket.playerName]);
                 player.HasCalledUno = true;
+                emitQunoCall(player, 'self', 'ok');
             }
         } else {
             // Invalid call — penalize unless they were just called on (avoid double penalty)
-            const recentlyGotUnoYou = player.LastUnoYouTime && (now - player.LastUnoYouTime < GRACE_MS);
-
             if (!recentlyGotUnoYou) {
                 logEvent(socket.playerName + ' called Quno at the wrong time - oops!', 'quno', [socket.playerName]);
+                emitQunoCall(player, 'self', 'invalid');
                 drawCards(socket.id, 2, { selfInflicted: true });
                 io.to(socket.id).emit('calledUnoMe');
+            } else {
+                emitQunoCall(player, 'self', 'late');
             }
         }
     });
@@ -463,17 +470,28 @@ function onConnection(socket) {
         const now = Date.now();
         const GRACE_MS = 1000;
 
+        const caught = [];  // names of players this call caught
+        const tooLate = []; // names of players who already called, or were already caught
+
         players.forEach((player) => {
             if (player.SocketID === socket.id) return; // can't call Quno on yourself
             const recentlyCalledUnoMe = player.LastUnoMeTime && (now - player.LastUnoMeTime < GRACE_MS);
+            const recentlyCaught = player.LastUnoYouTime && (now - player.LastUnoYouTime < GRACE_MS);
 
             // Catch any player who has 1 card and hasn't called Uno (and didn't just call it)
-            if(player.Hand.length == 1 && !player.HasCalledUno && !recentlyCalledUnoMe) {
+            if(player.Hand.length == 1 && !player.HasCalledUno && !recentlyCalledUnoMe && !recentlyCaught) {
                 logEvent(`${caller.Name} caught ${player.Name} without a Quno call`, 'quno', [caller.Name, player.Name]);
                 drawCards(player.SocketID, 4, { forcedBy: [[caller.Name, 4]] });
                 player.LastUnoYouTime = Date.now();
-            };
+                caught.push(player.Name);
+            } else if (player.Hand.length == 1 || recentlyCaught) {
+                tooLate.push(player.Name);
+            }
         });
+
+        // Calls where nobody was at 1 card are ignored
+        if (caught.length) emitQunoCall(caller, 'other', 'ok', caught);
+        else if (tooLate.length) emitQunoCall(caller, 'other', 'late', tooLate);
     });
 
     // Send the last completed-hand stats snapshot to whoever asks for it
@@ -871,6 +889,14 @@ async function offerSkipResponse() {
 // direction indicator widget stays in sync.
 function emitGameStatus() {
     io.emit('gameStatus', { cardsToDraw, playDirection });
+}
+
+// Tell all clients to flash a Quno bubble by the caller.
+//   kind:    'self' (called for themselves) | 'other' (called on someone else)
+//   result:  'ok' | 'invalid' (wrong time, self only) | 'late' (someone else got there first)
+//   targets: names of the players a 'other' call was on
+function emitQunoCall(caller, kind, result, targets = []) {
+    io.emit('qunoCall', { playerId: caller.PlayerID, kind, result, targets });
 }
 
 // Tell all clients how tall each pile is so they can draw the right number of layers
