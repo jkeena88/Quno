@@ -30,7 +30,9 @@ The prod server is https://quno.azurewebsites.net/. Changes that are merged into
 
 ## Admin Page
 
-`/admin` is a control panel for whoever runs the server. It shows the full game state and lets you intervene (boot players, adjust scores, force a turn, change options, and so on). It runs on its own Socket.IO namespace, so opening it doesn't count as a player.
+`/admin` is a control panel for whoever runs the server. It shows the game state and lets you intervene (boot players, adjust scores, force a turn, change options, and so on). It runs on its own Socket.IO namespace, so opening it doesn't count as a player.
+
+Players' cards are hidden on the admin page by default, so an admin who is also playing has no advantage. A toggle shows or hides them, and each change is announced in the players' game log. The server only sends the hands while they are shown, and card removal is disabled while they're hidden.
 
 It is protected by a password set in the `ADMIN_PASSWORD` environment variable. **If `ADMIN_PASSWORD` isn't set, the admin page is disabled** and the server logs a warning at startup.
 

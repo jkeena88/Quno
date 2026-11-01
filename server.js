@@ -1161,6 +1161,7 @@ async function startGame() {
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 const adminNs = io.of('/admin');
 const adminFailures = new Map(); // ip → { count, lockedUntil }
+let adminCardsVisible = false; // players' hands are hidden from the admin page unless the admin turns this on
 
 if (!ADMIN_PASSWORD) console.warn('ADMIN_PASSWORD is not set: the /admin page is disabled');
 
@@ -1200,6 +1201,12 @@ adminNs.on('connection', (socket) => {
         if (typeof ack === 'function') ack(result);
         adminNs.emit('state', buildAdminState());
     });
+
+    // Once the last admin page closes, hide the cards again (and tell the players)
+    socket.on('disconnect', () => {
+        const othersOpen = Array.from(adminNs.sockets.keys()).some(id => id !== socket.id);
+        if (!othersOpen) setAdminCardsVisible(false);
+    });
 });
 
 // Push a fresh snapshot once a second while an admin page is open
@@ -1213,6 +1220,7 @@ function buildAdminState() {
 
     return {
         hostName,
+        cardsVisible: adminCardsVisible,
         game: {
             hasMatch: players.size > 0,
             gameIsOver,
@@ -1231,7 +1239,8 @@ function buildAdminState() {
             .sort((a, b) => a.PlayerID - b.PlayerID)
             .map(p => ({
                 name: p.Name, seat: p.PlayerID, points: p.Points, handsWon: p.HandsWon,
-                hand: p.Hand,
+                hand: adminCardsVisible ? p.Hand : null, // null = hidden; only the count is sent
+                handCount: p.Hand.length,
                 connected: sockets.has(p.SocketID),
                 isHost: p.SocketID === playerA,
                 isCurrent: p.SocketID === currentPlayer,
@@ -1243,6 +1252,15 @@ function buildAdminState() {
             .filter(s => s.playerName && !players.has(s.id))
             .map(s => ({ name: s.playerName, isHost: s.id === playerA })),
     };
+}
+
+// Show or hide everyone's cards on the admin page. Every change is announced in the
+// players' game log so nobody is surprised. Returns false if nothing changed.
+function setAdminCardsVisible(visible) {
+    if (visible === adminCardsVisible) return false;
+    adminCardsVisible = visible;
+    logEvent(visible ? "The admin can now see everyone's cards" : "The admin can no longer see everyone's cards", 'room', []);
+    return true;
 }
 
 // Deal cards to a player without touching the draw stack (unlike drawCards)
@@ -1355,7 +1373,15 @@ function runAdminAction(type, p) {
             return ok(`${pl.Name} now has ${pl[field]} ${label}`);
         }
 
+        case 'setCardsVisible': {
+            const visible = p.visible === true;
+            if (!setAdminCardsVisible(visible)) return fail(visible ? "Cards are already shown" : "Cards are already hidden");
+            return ok(visible ? "Showing everyone's cards" : "Hiding everyone's cards");
+        }
+
         case 'removeCard': {
+            // Removing a card by ID would reveal whether it's in the hand, so it needs cards shown
+            if (!adminCardsVisible) return fail('Show the cards first');
             const pl = findPlayer(p.name);
             if (!pl) return fail(p.name + ' is not seated in the current hand');
             if (gameIsOver) return fail('The hand is over');

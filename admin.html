@@ -47,6 +47,7 @@
     .chip { display: inline-block; min-width: 30px; padding: 2px 6px; text-align: center; border-radius: 6px;
             font-weight: 700; border: 1px solid rgba(255,255,255,.25); }
     .chip.removable { cursor: pointer; }
+    .chip.back { background: #2a2d33; color: #6b6e75; border-color: #3a3d44; }
     .chip.removable:hover { outline: 2px solid var(--bad); }
     .opts { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 6px 14px; margin-bottom: 10px; }
     .opts label { display: flex; align-items: center; gap: 8px; cursor: pointer; }
@@ -142,7 +143,11 @@
         </section>
 
         <section class="panel">
-            <h2>Players in this hand <span class="muted">(click a card to remove it)</span></h2>
+            <h2>Players in this hand <span class="muted" id="handsHint"></span></h2>
+            <div class="bar">
+                <button id="cardsToggle">Show all cards</button>
+                <span class="muted" id="cardsNote">Cards are hidden so you can play fairly. Showing them is announced in the game log.</span>
+            </div>
             <div id="players"></div>
         </section>
 
@@ -255,6 +260,12 @@ $('bootBtn').onclick    = () => needSelected() && act('boot', { name: selected }
 $('drawBtn').onclick    = () => needSelected() && act('draw', { name: selected, count: $('drawCount').value });
 $('giveBtn').onclick    = () => needSelected() && act('giveCard', { name: selected, cardId: $('cardSel').value });
 
+$('cardsToggle').onclick = () => {
+    const show = !(lastState && lastState.cardsVisible);
+    act('setCardsVisible', { visible: show },
+        show ? "Show everyone's cards? The players will see a message in the game log." : null);
+};
+
 $('copyState').onclick = () => {
     navigator.clipboard.writeText(JSON.stringify(lastState, null, 2))
         .then(() => toast('State copied to clipboard', true));
@@ -318,6 +329,11 @@ function render(state) {
     if (sig === lastSig) return;
     lastSig = sig;
     syncOptions(state.options);
+    $('cardsToggle').textContent = state.cardsVisible ? 'Hide all cards' : 'Show all cards';
+    $('handsHint').textContent = state.cardsVisible ? '(click a card to remove it)' : '';
+    $('cardsNote').textContent = state.cardsVisible
+        ? 'Everyone can see in the game log that the admin is viewing cards.'
+        : 'Cards are hidden so you can play fairly. Showing them is announced in the game log.';
     renderGame(state);
     renderPlayers(state);
 }
@@ -355,9 +371,9 @@ function renderPlayers(s) {
                 ${p.connected ? '' : '<span class="tag off">offline</span>'}
                 ${p.calledUno ? '<span class="tag">Quno called</span>' : ''}
                 ${p.waitingForColor ? '<span class="tag">choosing color</span>' : ''}
-                <span class="muted">seat ${p.seat} · ${p.points} pts · ${p.handsWon} hands won · ${p.hand.length} cards</span>
+                <span class="muted">seat ${p.seat} · ${p.points} pts · ${p.handsWon} hands won · ${p.handCount} cards</span>
             </div>
-            <div class="hand">${p.hand.slice().sort(byColorThenType).map(c => chip(c, true)).join('') || '<span class="muted">empty hand</span>'}</div>
+            <div class="hand">${(p.hand ? p.hand.slice().sort(byColorThenType).map(c => chip(c, true)) : Array(p.handCount).fill('<span class="chip back" title="Hidden">?</span>')).join('') || '<span class="muted">empty hand</span>'}</div>
         </div>`).join('')
         : '<p class="muted">No match in progress.</p>';
 
