@@ -62,12 +62,18 @@
     #eventLog .ev-div::before, #eventLog .ev-div::after { content: ''; flex: 1; border-top: 1px solid var(--line); }
     #eventLog .ev-div.match { color: var(--text); font-weight: 700; padding: 9px 8px; }
     #eventLog .ev-div.match::before, #eventLog .ev-div.match::after { border-top: 2px solid #555; }
-    #eventLog.hide-play .ev.play, #eventLog.hide-draw .ev.draw,
-    #eventLog.hide-quno .ev.quno, #eventLog.hide-room .ev.room { display: none; }
-    .f-chip { padding: 2px 10px; border-radius: 999px; font-size: 12px; display: inline-flex; align-items: center; gap: 6px; }
-    .f-chip i { width: 8px; height: 8px; border-radius: 50%; background: var(--dot); display: inline-block; }
-    .f-chip[aria-pressed="false"] { color: var(--muted); border-style: dashed; }
-    .f-chip[aria-pressed="false"] i { background: transparent; border: 1px solid var(--muted); }
+    #eventLog .filtered { display: none !important; }
+    .ms { position: relative; width: 210px; }
+    .ms-btn { width: 100%; display: flex; justify-content: space-between; align-items: center; gap: 8px; white-space: nowrap; }
+    .ms-btn > span:first-child { overflow: hidden; text-overflow: ellipsis; }
+    .ms-menu { position: absolute; top: calc(100% + 4px); left: 0; width: max-content; min-width: 100%; max-width: 320px;
+               max-height: 260px; overflow-y: auto; z-index: 50; background: var(--panel); border: 1px solid var(--line);
+               border-radius: 8px; padding: 4px; box-shadow: 0 8px 24px rgba(0,0,0,.5); }
+    .ms-item { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 4px; cursor: pointer; }
+    .ms-item:hover { background: #1e2128; }
+    .ms-item span:last-child { overflow: hidden; text-overflow: ellipsis; }
+    .ms-all { font-weight: 600; border-bottom: 1px solid var(--line); border-radius: 4px 4px 0 0; margin-bottom: 2px; }
+    .ms-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dot); flex: none; }
     #toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); padding: 8px 16px;
              border-radius: 8px; opacity: 0; transition: opacity .2s; pointer-events: none; }
     #toast.show { opacity: 1; }
@@ -159,10 +165,8 @@
         <section class="panel">
             <h2>Event log</h2>
             <div class="bar" id="logFilters">
-                <button class="f-chip" data-cat="play" aria-pressed="true" style="--dot:#1D9E75"><i></i>Play</button>
-                <button class="f-chip" data-cat="draw" aria-pressed="true" style="--dot:#BA7517"><i></i>Draw</button>
-                <button class="f-chip" data-cat="quno" aria-pressed="true" style="--dot:#7F77DD"><i></i>Quno</button>
-                <button class="f-chip" data-cat="room" aria-pressed="true" style="--dot:#888780"><i></i>Table &amp; room</button>
+                <div class="ms" id="filterTypes"></div>
+                <div class="ms" id="filterPlayers"></div>
             </div>
             <div id="eventLog"></div>
         </section>
@@ -225,10 +229,14 @@ function signIn(password) {
     socket.on('state', render);
         socket.on('eventLog', entries => {
         $('eventLog').innerHTML = entries.slice().reverse().map(logRow).join('');
+        addLogPlayers(entries.flatMap(e => e.affects || []));
+        applyLogFilters();
     });
     socket.on('logEvent', entry => {
         const box = $('eventLog');
+        addLogPlayers(entry.affects || []);
         box.insertAdjacentHTML('afterbegin', logRow(entry));
+        if (!rowVisible(box.firstElementChild)) box.firstElementChild.classList.add('filtered');
         while (box.children.length > MAX_LOG_ROWS) box.lastChild.remove();
     });
 }
@@ -334,6 +342,7 @@ function render(state) {
     $('cardsNote').textContent = state.cardsVisible
         ? 'Everyone can see in the game log that the admin is viewing cards.'
         : 'Cards are hidden so you can play fairly. Showing them is announced in the game log.';
+    addLogPlayers([...state.players.map(p => p.name), ...state.waiting.map(w => w.name)]);
     renderGame(state);
     renderPlayers(state);
 }
@@ -443,14 +452,154 @@ function logRow(entry) {
     }
     const cat = LOG_TYPES.includes(entry.type) ? entry.type : 'room';
     const isAdmin = entry.parts.map(partText).join('').startsWith('[admin]');
-    return `<div class="ev ${cat}${isAdmin ? ' admin' : ''}" title="${tip}"><span class="time">${time}</span><span class="tx">${entry.parts.map(partHtml).join('')}</span></div>`;
+    return `<div class="ev ${cat}${isAdmin ? ' admin' : ''}" data-cat="${cat}" data-affects="${esc(JSON.stringify(entry.affects || []))}" title="${tip}"><span class="time">${time}</span><span class="tx">${entry.parts.map(partHtml).join('')}</span></div>`;
 }
 
-document.querySelectorAll('#logFilters .f-chip').forEach(chip => chip.addEventListener('click', () => {
-    const off = chip.getAttribute('aria-pressed') === 'true';
-    chip.setAttribute('aria-pressed', String(!off));
-    $('eventLog').classList.toggle('hide-' + chip.dataset.cat, off);
-}));
+// ── Log filters ──
+// A dropdown of checkboxes with a "Select all" row. Anything not unchecked counts as selected,
+// so new items (such as a player who joins later) start out selected.
+function createMultiSelect(root, label, onChange) {
+    const deselected = new Set();
+    let items = [];   // [{ value, text, dot? }]
+    let allCb = null;
+    let itemCbs = [];
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'ms-btn';
+    btn.setAttribute('aria-haspopup', 'true');
+    btn.setAttribute('aria-expanded', 'false');
+    const btnText = document.createElement('span');
+    const caret = document.createElement('span');
+    caret.textContent = '▾';
+    btn.append(btnText, caret);
+
+    const menu = document.createElement('div');
+    menu.className = 'ms-menu';
+    menu.hidden = true;
+    root.append(btn, menu);
+
+    const selectedCount = () => items.filter(i => !deselected.has(i.value)).length;
+
+    function sync() {
+        const n = selectedCount();
+        btnText.textContent = label + ': ' + (n === items.length ? 'All' : n === 0 ? 'None' : n + ' of ' + items.length);
+        if (allCb) {
+            allCb.checked = n === items.length;
+            allCb.indeterminate = n > 0 && n < items.length;
+        }
+    }
+
+    function makeRow(text, cls, dot) {
+        const row = document.createElement('label');
+        row.className = 'ms-item ' + cls;
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        row.appendChild(cb);
+        if (dot) {
+            const d = document.createElement('span');
+            d.className = 'ms-dot';
+            d.style.setProperty('--dot', dot);
+            row.appendChild(d);
+        }
+        const t = document.createElement('span');
+        t.textContent = text;   // names go in via textContent, so they are never parsed as HTML
+        row.appendChild(t);
+        menu.appendChild(row);
+        return cb;
+    }
+
+    function render() {
+        menu.textContent = '';
+
+        allCb = makeRow('Select all', 'ms-all');
+        allCb.addEventListener('change', () => {
+            // Everything selected → clear it all; otherwise select everything
+            const selectAll = selectedCount() !== items.length;
+            deselected.clear();
+            if (!selectAll) items.forEach(i => deselected.add(i.value));
+            itemCbs.forEach(cb => { cb.checked = selectAll; });
+            sync();
+            onChange();
+        });
+
+        itemCbs = items.map(item => {
+            const cb = makeRow(item.text, '', item.dot);
+            cb.checked = !deselected.has(item.value);
+            cb.addEventListener('change', () => {
+                if (cb.checked) deselected.delete(item.value); else deselected.add(item.value);
+                sync();
+                onChange();
+            });
+            return cb;
+        });
+        sync();
+    }
+
+    function setOpen(open) {
+        menu.hidden = !open;
+        btn.setAttribute('aria-expanded', String(open));
+    }
+
+    btn.addEventListener('click', () => setOpen(menu.hidden));
+    document.addEventListener('click', e => { if (!root.contains(e.target)) setOpen(false); });
+    root.addEventListener('keydown', e => {
+        if (e.key === 'Escape' && !menu.hidden) { setOpen(false); btn.focus(); }
+    });
+
+    render();
+
+    return {
+        setItems(newItems) { items = newItems; render(); },
+        isSelected: value => !deselected.has(value),
+        allSelected: () => selectedCount() === items.length,
+    };
+}
+
+// A row shows if its type is selected and, unless everything in the Players list is selected,
+// it concerns a selected player (or concerns no one in particular and "No specific player"
+// is selected). Dividers between hands are always shown.
+function rowVisible(el) {
+    if (el.classList.contains('ev-div')) return true;
+    if (!typeFilter.isSelected(el.dataset.cat)) return false;
+    if (playerFilter.allSelected()) return true;
+    const affects = JSON.parse(el.dataset.affects || '[]');
+    if (affects.length === 0) return playerFilter.isSelected(NO_PLAYER);
+    return affects.some(name => playerFilter.isSelected(name));
+}
+
+function applyLogFilters() {
+    Array.from($('eventLog').children).forEach(el => el.classList.toggle('filtered', !rowVisible(el)));
+}
+
+const typeFilter = createMultiSelect($('filterTypes'), 'Types', applyLogFilters);
+typeFilter.setItems(LOG_TYPES.map(t => ({
+    value: t,
+    text: t === 'room' ? 'Table & room' : t[0].toUpperCase() + t.slice(1),
+    dot: { play: '#1D9E75', draw: '#BA7517', quno: '#7F77DD', room: '#888780' }[t],
+})));
+
+// The player list grows as names show up in the game state or the log; "No specific player"
+// covers entries that aren't about anyone (a Symbol, so it can't clash with a name)
+const NO_PLAYER = Symbol('no specific player');
+const playerFilter = createMultiSelect($('filterPlayers'), 'Players', applyLogFilters);
+const logPlayers = [];
+function refreshPlayerItems() {
+    playerFilter.setItems([
+        { value: NO_PLAYER, text: 'No specific player' },
+        ...logPlayers.map(name => ({ value: name, text: name })),
+    ]);
+}
+refreshPlayerItems();
+function addLogPlayers(names) {
+    let added = false;
+    names.forEach(name => {
+        if (name && !logPlayers.includes(name)) { logPlayers.push(name); added = true; }
+    });
+    if (!added) return;
+    logPlayers.sort((a, b) => a.localeCompare(b));
+    refreshPlayerItems();
+}
 
 // ── Start: reuse the password for this browser tab so a reload doesn't ask again ──
 

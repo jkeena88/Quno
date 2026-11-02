@@ -1147,33 +1147,64 @@ hr {
 .log-divider-match { padding: 12px; font-weight: 600; color: var(--text-primary); }
 .log-divider-match::before, .log-divider-match::after { border-top-width: 2px; }
 
-/* Filter chips */
-.log-filters { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 8px 8px 0; flex-shrink: 0; }
-.log-chip {
+/* Log filters: two multi-select dropdowns (message types, players) */
+.log-filters { display: flex; gap: 6px; padding: 0 8px 8px 0; flex-shrink: 0; }
+.ms { position: relative; flex: 1; min-width: 0; }
+.ms-btn {
+    width: 100%;
     font: inherit;
     font-size: 12px;
-    padding: 3px 10px;
-    border-radius: 999px;
+    padding: 4px 8px;
+    border-radius: var(--radius-sm);
     border: 1px solid var(--border-medium);
-    background: transparent;
+    background: var(--bg-surface);
     color: var(--text-primary);
     cursor: pointer;
-    display: inline-flex;
+    display: flex;
+    justify-content: space-between;
     align-items: center;
     gap: 6px;
+    white-space: nowrap;
 }
-.log-chip-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dot); }
-.log-chip[data-cat="play"] { --dot: var(--log-play-edge); }
-.log-chip[data-cat="draw"] { --dot: var(--log-draw-edge); }
-.log-chip[data-cat="quno"] { --dot: var(--log-quno-edge); }
-.log-chip[data-cat="room"] { --dot: var(--log-room-edge); }
-.log-chip[aria-pressed="false"] { color: var(--text-muted); border-style: dashed; }
-.log-chip[aria-pressed="false"] .log-chip-dot { background: transparent; border: 1px solid var(--text-muted); }
+.ms-btn > span:first-child { overflow: hidden; text-overflow: ellipsis; }
+.ms-menu {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    width: max-content;
+    min-width: 100%;
+    max-width: 220px;
+    max-height: 240px;
+    overflow-y: auto;
+    z-index: 100;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-medium);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-modal);
+    padding: 4px;
+}
+.ms-right .ms-menu { left: auto; right: 0; }
+.ms-menu[hidden] { display: none; }
+.ms-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 8px;
+    border-radius: 4px;
+    font-size: 12.5px;
+    cursor: pointer;
+}
+.ms-item:hover { background: var(--bg-panel); }
+.ms-item span:last-child { overflow: hidden; text-overflow: ellipsis; }
+.ms-all { font-weight: 600; border-bottom: 1px solid var(--border-subtle); border-radius: 4px 4px 0 0; margin-bottom: 2px; }
+.ms-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dot); flex: none; }
+.ms-dot-play { --dot: var(--log-play-edge); }
+.ms-dot-draw { --dot: var(--log-draw-edge); }
+.ms-dot-quno { --dot: var(--log-quno-edge); }
+.ms-dot-room { --dot: var(--log-room-edge); }
 
-#message-container.hide-play .log-play,
-#message-container.hide-draw .log-draw,
-#message-container.hide-quno .log-quno,
-#message-container.hide-room .log-room { display: none; }
+/* Entries hidden by the log filters */
+.log-filtered { display: none !important; }
 
 /* ── Quno call bubble ── */
 .player { position: relative; }

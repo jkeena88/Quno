@@ -39,6 +39,8 @@ function renderPlayerList(lobbyPlayers, hostName) {
     const playerListDiv = document.getElementById('playerList');
     playerListDiv.innerHTML = "<strong>Players:</strong>&nbsp;";
 
+    addLogPlayers(lobbyPlayers);
+
     lobbyPlayers.forEach(name => {
         const span = document.createElement('span');
         span.style.marginRight = '10px';
@@ -597,6 +599,9 @@ socket.on('logMessage', function(entry) {
 
     el.append(icon, text);
 
+    el._affects = entry.affects || [];
+    addLogPlayers(el._affects);
+
     if ((entry.affects || []).includes(playerName)) {
         el.classList.add('affects-you');
         const tag = document.createElement('span');
@@ -605,17 +610,158 @@ socket.on('logMessage', function(entry) {
         el.appendChild(tag);
     }
 
+    if (!entryVisible(el)) el.classList.add('log-filtered');
     container.insertBefore(el, container.firstChild);
 });
 
-// Filter chips: hide or show a category by toggling a class on the container
-document.querySelectorAll('#log-filters .log-chip').forEach(chip => {
-    chip.addEventListener('click', () => {
-        const turningOff = chip.getAttribute('aria-pressed') === 'true';
-        chip.setAttribute('aria-pressed', String(!turningOff));
-        document.getElementById('message-container').classList.toggle('hide-' + chip.dataset.cat, turningOff);
+// ── Log filters ──
+// A dropdown of checkboxes with a "Select all" row. Anything not unchecked counts as selected,
+// so new items (such as a player who joins later) start out selected.
+function createMultiSelect(root, label, onChange) {
+    const deselected = new Set();
+    let items = [];   // [{ value, text, dot? }]
+    let allCb = null;
+    let itemCbs = [];
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'ms-btn';
+    btn.setAttribute('aria-haspopup', 'true');
+    btn.setAttribute('aria-expanded', 'false');
+    const btnText = document.createElement('span');
+    const caret = document.createElement('span');
+    caret.textContent = '▾';
+    btn.append(btnText, caret);
+
+    const menu = document.createElement('div');
+    menu.className = 'ms-menu';
+    menu.hidden = true;
+    root.append(btn, menu);
+
+    const selectedCount = () => items.filter(i => !deselected.has(i.value)).length;
+
+    // Refresh the button text and the Select all checkbox to match the current selection
+    function sync() {
+        const n = selectedCount();
+        btnText.textContent = label + ': ' + (n === items.length ? 'All' : n === 0 ? 'None' : n + ' of ' + items.length);
+        if (allCb) {
+            allCb.checked = n === items.length;
+            allCb.indeterminate = n > 0 && n < items.length;
+        }
+    }
+
+    function makeRow(text, cls, dot) {
+        const row = document.createElement('label');
+        row.className = 'ms-item ' + cls;
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        row.appendChild(cb);
+        if (dot) {
+            const d = document.createElement('span');
+            d.className = 'ms-dot ms-dot-' + dot;
+            row.appendChild(d);
+        }
+        const t = document.createElement('span');
+        t.textContent = text;   // names go in via textContent, so they are never parsed as HTML
+        row.appendChild(t);
+        menu.appendChild(row);
+        return cb;
+    }
+
+    function render() {
+        menu.textContent = '';
+
+        allCb = makeRow('Select all', 'ms-all');
+        allCb.addEventListener('change', () => {
+            // Everything selected → clear it all; otherwise select everything
+            const selectAll = selectedCount() !== items.length;
+            deselected.clear();
+            if (!selectAll) items.forEach(i => deselected.add(i.value));
+            itemCbs.forEach(cb => { cb.checked = selectAll; });
+            sync();
+            onChange();
+        });
+
+        itemCbs = items.map(item => {
+            const cb = makeRow(item.text, '', item.dot);
+            cb.checked = !deselected.has(item.value);
+            cb.addEventListener('change', () => {
+                if (cb.checked) deselected.delete(item.value); else deselected.add(item.value);
+                sync();
+                onChange();
+            });
+            return cb;
+        });
+        sync();
+    }
+
+    function setOpen(open) {
+        menu.hidden = !open;
+        btn.setAttribute('aria-expanded', String(open));
+    }
+
+    btn.addEventListener('click', () => setOpen(menu.hidden));
+    document.addEventListener('click', e => { if (!root.contains(e.target)) setOpen(false); });
+    root.addEventListener('keydown', e => {
+        if (e.key === 'Escape' && !menu.hidden) { setOpen(false); btn.focus(); }
     });
-});
+
+    render();
+
+    return {
+        setItems(newItems) { items = newItems; render(); },
+        isSelected: value => !deselected.has(value),
+        allSelected: () => selectedCount() === items.length,
+    };
+}
+
+// An entry shows if its type is selected and, unless everything in the Players list is selected,
+// it concerns a selected player (or concerns no one in particular and "No specific player"
+// is selected). Dividers between hands are always shown.
+function entryVisible(el) {
+    if (el.classList.contains('log-divider')) return true;
+    if (!typeFilter.isSelected(el.dataset.cat)) return false;
+    if (playerFilter.allSelected()) return true;
+    const affects = el._affects || [];
+    if (affects.length === 0) return playerFilter.isSelected(NO_PLAYER);
+    return affects.some(name => playerFilter.isSelected(name));
+}
+
+function applyLogFilters() {
+    document.querySelectorAll('#message-container > div').forEach(el => {
+        el.classList.toggle('log-filtered', !entryVisible(el));
+    });
+}
+
+const typeFilter = createMultiSelect(document.getElementById('filter-types'), 'Types', applyLogFilters);
+typeFilter.setItems([
+    { value: 'play', text: 'Play', dot: 'play' },
+    { value: 'draw', text: 'Draw', dot: 'draw' },
+    { value: 'quno', text: 'Quno', dot: 'quno' },
+    { value: 'room', text: 'Table & room', dot: 'room' },
+]);
+
+// The player list grows as names show up in the lobby or the log. It also has a
+// "No specific player" item for entries that aren't about anyone (a Symbol, so it can't clash with a name).
+const NO_PLAYER = Symbol('no specific player');
+const playerFilter = createMultiSelect(document.getElementById('filter-players'), 'Players', applyLogFilters);
+const logPlayers = [];
+function refreshPlayerItems() {
+    playerFilter.setItems([
+        { value: NO_PLAYER, text: 'No specific player' },
+        ...logPlayers.map(name => ({ value: name, text: name })),
+    ]);
+}
+refreshPlayerItems();
+function addLogPlayers(names) {
+    let added = false;
+    names.forEach(name => {
+        if (name && !logPlayers.includes(name)) { logPlayers.push(name); added = true; }
+    });
+    if (!added) return;
+    logPlayers.sort((a, b) => a.localeCompare(b));
+    refreshPlayerItems();
+}
 
 // Display a rich log entry when the host changes game options
 socket.on('optionsChanged', function({ changedBy, options, labels }) {
@@ -624,6 +770,8 @@ socket.on('optionsChanged', function({ changedBy, options, labels }) {
     el.classList.add('message', 'log-room');
     el.dataset.cat = 'room';
     el.title = new Date().toLocaleTimeString();
+    el._affects = [changedBy];
+    addLogPlayers(el._affects);
 
     const rows = Object.entries(labels).map(([key, label]) => {
         const on = !!options[key];
@@ -642,6 +790,7 @@ socket.on('optionsChanged', function({ changedBy, options, labels }) {
         </div>
         ${rows}
     `;
+    if (!entryVisible(el)) el.classList.add('log-filtered');
     messageContainer.insertBefore(el, messageContainer.firstChild);
 });
 
