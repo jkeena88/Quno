@@ -20,6 +20,7 @@ let gameInProgress = false;
 let isDrawing = false;       // true while the server is dealing cards to this player
 let matchEverStarted = false;
 let isWaitlisted = false;    // true while waiting for a seat because the game is full
+let isPendingJoin = false;   // true while waiting to join at the start of the next hand
 
 const sidePanel = document.getElementById('side-panel');
 const collapseButton = document.getElementById('collapse-btn');
@@ -152,6 +153,7 @@ socket.on('rejoinState', function(state) {
 
 socket.on('setHost', function(name) {
     playerAName = name;
+    refreshWaitingText();
 });
 
 // Show host controls when this player becomes the host
@@ -197,6 +199,7 @@ socket.on('updateOptions', function(options) {
         stackDraw4:    'stackDraw4',
         skipDraw4:     'skipDraw4',
         reverseDraw4:  'reverseDraw4',
+        drawUntilPlay: 'drawUntilPlay',
     };
     for (const [key, name] of Object.entries(optionMap)) {
         const cb = document.querySelector(`input[name="${name}"]`);
@@ -212,6 +215,7 @@ socket.on('updateOptions', function(options) {
 
 socket.on('gameStarted', function(playerList) {
     if (isWaitlisted) return;
+    isPendingJoin = false;
     players = playerList.length;
     hide('waitingOverlay');
     gameInProgress = true;
@@ -234,6 +238,7 @@ socket.on('gameStarted', function(playerList) {
 
 // Show a holding message when the player joins mid-hand and must wait for the next deal
 socket.on('pendingJoin', function() {
+    isPendingJoin = true;
     const overlay = document.getElementById('waitingOverlay');
     overlay.textContent = 'A hand is in progress — you will join at the start of the next hand';
     overlay.style.display = 'flex';
@@ -250,8 +255,15 @@ socket.on('roomFull', function({ position, maxPlayers }) {
 // A seat opened up for us
 socket.on('roomJoined', function() {
     isWaitlisted = false;
-    document.getElementById('waitingOverlay').textContent = 'Waiting for the host to start the game';
+    refreshWaitingText();
 });
+
+// "Waiting for the host (Name) to start the game" — not shown over the full-room / next-hand messages
+function refreshWaitingText() {
+    if (isWaitlisted || isPendingJoin) return;
+    document.getElementById('waitingOverlay').textContent =
+        'Waiting for the host' + (playerAName ? ' (' + playerAName + ')' : '') + ' to start the game';
+}
 
 // Show or hide the waiting overlay for non-host players
 function updateWaitingOverlay() {
@@ -283,7 +295,9 @@ socket.on('newPlayer', function(data) {
     const {players: lobbyPlayers, host: hostName} = data;
 
     playersInLobby = lobbyPlayers;
+    playerAName = hostName;
     renderPlayerList(lobbyPlayers, hostName);
+    refreshWaitingText();
 
     if (isPlayerA) {
         updateStartButtonState();

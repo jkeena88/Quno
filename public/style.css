@@ -895,6 +895,9 @@ hr {
 }
 
 #waitingOverlay {
+    right: 260px;               /* stop at the log side panel so the text centers over the game area */
+    padding: 0 24px;
+    transition: right 0.25s ease;
     background: rgba(26, 26, 26, 0.72);
     -webkit-backdrop-filter: blur(4px);
     backdrop-filter: blur(4px);
@@ -904,6 +907,10 @@ hr {
     text-align: center;
     pointer-events: none;
     letter-spacing: 0.01em;
+}
+
+body:has(#side-panel.collapsed) #waitingOverlay {
+    right: 34px;
 }
 
 #handSummaryModal {

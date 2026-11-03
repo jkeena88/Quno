@@ -64,6 +64,12 @@ let skipSkip = false;       // targeted player can play a Skip to redirect a pla
 let stackDraw4 = false;
 let skipDraw4 = false;
 let reverseDraw4 = false;
+let drawUntilPlay = false;  // keep drawing until a card can be played (Uno rules: draw one, then pass if it can't be played)
+
+// Snapshot of every option, as sent to clients and the admin page
+function currentOptions() {
+    return { playWildDraw4, stackDraw2, skipDraw2, reverseDraw2, skipSkip, stackDraw4, skipDraw4, reverseDraw4 };
+}
 
 // All card types — used to build the "excluded" list when checking who can stack
 const cardList = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 'skip', 'reverse', 'draw2', 'wild', 'draw4'];
@@ -125,6 +131,7 @@ function onConnection(socket) {
                 playersInLobby = playersInLobby.filter(p => p !== disconnectedName);
                 pendingPlayers = pendingPlayers.filter(id => id !== disconnectedId);
                 const leavingPlayerId = entry ? entry.PlayerID : -1;
+                returnHandToDiscard(entry);
                 players.delete(disconnectedId);
                 io.emit('playerLeft', { playerName: disconnectedName, playerId: leavingPlayerId });
                 io.emit('newPlayer', { players: playersInLobby, host: hostName });
@@ -203,7 +210,7 @@ function onConnection(socket) {
             }
             io.emit('newPlayer', { players: playersInLobby, host: hostName });
             logEvent(playerName + ' rejoined the game', 'room', [playerName]);
-            io.to(socket.id).emit('updateOptions', { playWildDraw4, stackDraw2, skipDraw2, reverseDraw2, skipSkip, stackDraw4, skipDraw4, reverseDraw4 });
+            io.to(socket.id).emit('updateOptions', currentOptions());
             if (socket.id === playerA) {
                 io.to(socket.id).emit('isPlayerA', { gameInProgress: !gameIsOver });
                 io.emit('setHost', hostName);
@@ -221,7 +228,7 @@ function onConnection(socket) {
             io.emit('setHost', hostName);
         }
 
-        io.to(socket.id).emit('updateOptions', { playWildDraw4, stackDraw2, skipDraw2, reverseDraw2, skipSkip, stackDraw4, skipDraw4, reverseDraw4 });
+        io.to(socket.id).emit('updateOptions', currentOptions());
 
         // Game is full (or others are already queued ahead of this person): wait for a seat
         if (!playersInLobby.includes(playerName) &&
@@ -370,9 +377,7 @@ function onConnection(socket) {
                         await nextTurn(true);
                         resolvePendingWin();
                         if (!gameIsOver) {
-                            if (!canPlay(currentPlayer, ['none'])) {
-                                autoDraw(currentPlayer);
-                            }
+                            drawIfStuck(currentPlayer);
                             clearRequiredPlay();
                             io.emit('turnChange', players.get(currentPlayer).PlayerID);
                             turnStartTime = Date.now();
@@ -385,11 +390,6 @@ function onConnection(socket) {
                 }
             }
         }
-    });
-
-    // Player manually draws from the pile
-    socket.on('drawCard', function() {
-        autoDraw(socket.id);
     });
 
     // Advance the game after the player picks a color following a wild
@@ -518,8 +518,9 @@ function applyOptions(selectedOptions, changedBy) {
     stackDraw4 = selectedOptions.includes('stackDraw4');
     skipDraw4 = selectedOptions.includes('skipDraw4');
     reverseDraw4 = selectedOptions.includes('reverseDraw4');
+    drawUntilPlay = selectedOptions.includes('drawUntilPlay');
 
-    const allOptions = { playWildDraw4, stackDraw2, skipDraw2, reverseDraw2, skipSkip, stackDraw4, skipDraw4, reverseDraw4 };
+    const allOptions = currentOptions();
     io.emit('updateOptions', allOptions);
 
     const optionLabels = {
@@ -527,6 +528,7 @@ function applyOptions(selectedOptions, changedBy) {
         stackDraw2: 'Stack Draw 2s', skipDraw2: 'Skip Draw 2s', reverseDraw2: 'Reverse Draw 2s',
         skipSkip: 'Skip a Skip',
         stackDraw4: 'Stack Draw 4s', skipDraw4: 'Skip Draw 4s', reverseDraw4: 'Reverse Draw 4s',
+        drawUntilPlay: 'Keep drawing until you can play',
     };
     io.emit('optionsChanged', { changedBy, options: allOptions, labels: optionLabels });
 
@@ -539,7 +541,7 @@ function assignHost(targetSocket) {
     playerA = targetSocket.id;
     hostName = targetSocket.playerName;
     io.to(playerA).emit('isPlayerA', { gameInProgress: !gameIsOver });
-    io.to(playerA).emit('updateOptions', { playWildDraw4, stackDraw2, skipDraw2, reverseDraw2, skipSkip, stackDraw4, skipDraw4, reverseDraw4 });
+    io.to(playerA).emit('updateOptions', currentOptions());
     io.emit('setHost', hostName);
     io.emit('newPlayer', { players: playersInLobby, host: hostName });
     logEvent(hostName + ' is now the host', 'room', [hostName]);
@@ -672,6 +674,7 @@ function bootPlayerByName(targetName) {
         playersInLobby = playersInLobby.filter(p => p !== targetName);
         pendingPlayers = pendingPlayers.filter(id => id !== targetSocketId);
         const leavingPlayerId = targetPlayerEntry.PlayerID;
+        returnHandToDiscard(targetPlayerEntry);
         players.delete(targetSocketId);
 
         io.emit('playerLeft', { playerName: targetName, playerId: leavingPlayerId });
@@ -699,6 +702,17 @@ function bootPlayerByName(targetName) {
         if (players.size === 0) promoteWaiting();
         logEvent(targetName + ' was booted', 'room', [targetName]);
     }
+}
+
+// A player leaving for good: their cards go into the discard pile, just under the top card,
+// so they stay in the game and get reshuffled into the deck when it runs out
+function returnHandToDiscard(player) {
+    if (!player || player.Hand.length === 0) return;
+    const top = discardPile.pop();
+    discardPile.push(...player.Hand);
+    if (top) discardPile.push(top);
+    player.Hand = [];
+    emitPileStatus();
 }
 
 // ── Thin wrappers around pure functions ──────────────────────────────────────
@@ -777,8 +791,16 @@ function dealHands() {
     } while(card.Type === 'wild' || card.Type === 'draw4')
 }
 
-// Draw one card for a player, reshuffling the discard pile into the deck if needed
+// Cards that can still be drawn: the draw pile plus the discard pile, minus the top discard
+function cardsAvailable() {
+    return deck.length + Math.max(0, discardPile.length - 1);
+}
+
+// Draw one card for a player, reshuffling the discard pile into the deck if needed.
+// Returns false (and draws nothing) if there are no cards left.
 function performDraw(player) {
+    if (cardsAvailable() < 1) return false; // nothing left to draw
+
     if(deck.length < 1) {
         // Keep the top discard card in place; shuffle the rest back into the deck
         const tempCard = discardPile.pop();
@@ -794,6 +816,7 @@ function performDraw(player) {
 
     io.emit('cardDrawn');
     emitPileStatus();
+    return true;
 }
 
 // ── Stacking helpers ──────────────────────────────────────────────────────────
@@ -870,9 +893,7 @@ async function offerSkipResponse() {
         if (!gameIsOver) {
             await nextTurn(true);
             clearRequiredPlay();
-            if (!canPlay(currentPlayer, ['none'])) {
-                autoDraw(currentPlayer);
-            }
+            drawIfStuck(currentPlayer);
             io.emit('turnChange', players.get(currentPlayer).PlayerID);
             turnStartTime = Date.now();
         }
@@ -915,16 +936,20 @@ function revealPayload() {
 //                 Leave false for Quno penalties, which must not wipe a stack that is still pending.
 //   forcedBy:     [[playerName, count], ...] — who gets "forced" credit for these cards
 //   selfInflicted: the drawer caused this penalty themselves (counts as a self-own)
-function drawCards(SocketID, num, { paysStack = false, forcedBy = [], selfInflicted = false } = {}) {
-    if (num <= 0) return Promise.resolve();
+function drawCards(SocketID, requested, { paysStack = false, forcedBy = [], selfInflicted = false } = {}) {
+    if (requested <= 0) return Promise.resolve();
 
     const player = players.get(SocketID);
     if (!player) return Promise.resolve();
 
-    const label = num === 1 ? ' card' : ' cards';
-    logEvent(`${player.Name} drew ${num}${label}`, 'draw', [player.Name]);
-
-    recordDrawStats(players, player, num, forcedBy, selfInflicted);
+    // Only cards that exist can be drawn; the rest are simply not drawn
+    const num = Math.min(requested, cardsAvailable());
+    let left = num;
+    forcedBy = forcedBy.map(([name, count]) => {
+        const credited = Math.min(count, left);
+        left -= credited;
+        return [name, credited];
+    });
 
     if (paysStack) {
         cardsToDraw = 0;
@@ -932,6 +957,16 @@ function drawCards(SocketID, num, { paysStack = false, forcedBy = [], selfInflic
         stackContributions.clear();
         emitGameStatus();
     }
+
+    if (num <= 0) {
+        logEvent(`${player.Name} had no cards left to draw`, 'draw', [player.Name]);
+        return Promise.resolve();
+    }
+
+    const label = num === 1 ? ' card' : ' cards';
+    logEvent(`${player.Name} drew ${num}${label}`, 'draw', [player.Name]);
+
+    recordDrawStats(players, player, num, forcedBy, selfInflicted);
 
     io.to(SocketID).emit('notCalledUnoMe');
 
@@ -950,18 +985,21 @@ function drawCards(SocketID, num, { paysStack = false, forcedBy = [], selfInflic
     });
 }
 
-// Draw cards one at a time until the player has something playable
+// Draw for a player who has nothing playable. Uno rules: draw one card. With the
+// drawUntilPlay option: keep drawing until something is playable.
+// Resolves true if the player can play a card afterwards, false if they're stuck.
 function autoDraw(SocketID) {
-    if (gameIsOver) return Promise.resolve();
+    if (gameIsOver) return Promise.resolve(true);
     const player = players.get(SocketID);
-    if (!player) return Promise.resolve();
+    if (!player) return Promise.resolve(true);
+
+    const playableNow = () => canPlayHand(player.Hand, currentColor, currentType, ['none']);
 
     return new Promise((resolve) => {
         let drawn = 0; // cards drawn in this sequence
 
         const tryDraw = () => {
-            if (!canPlay(SocketID, ['none'])) {
-                performDraw(player);
+            if (!playableNow() && (drawUntilPlay || drawn === 0) && performDraw(player)) {
                 drawn++;
                 setTimeout(tryDraw, CARD_DRAW_DELAY_MS);
             } else {
@@ -970,6 +1008,8 @@ function autoDraw(SocketID) {
                     player.HandSearched += drawn;
                     player.MatchSearched += drawn;
                     logEvent(`${player.Name} drew ${drawn} ${drawn === 1 ? 'card' : 'cards'}`, 'draw', [player.Name]);
+                } else if (!playableNow()) {
+                    logEvent(`${player.Name} had no cards left to draw`, 'draw', [player.Name]);
                 }
 
                 player.HasCalledUno = false;
@@ -981,11 +1021,21 @@ function autoDraw(SocketID) {
                     player.MatchTurnTime += elapsed;
                     turnStartTime = null;
                 }
-                resolve();
+                resolve(playableNow());
             }
         };
 
         tryDraw();
+    });
+}
+
+// If the player has nothing playable, draw for them. Under Uno rules a drawn card
+// that still can't be played ends their turn.
+function drawIfStuck(SocketID) {
+    if (canPlay(SocketID, ['none'])) return;
+    const player = players.get(SocketID);
+    autoDraw(SocketID).then(canPlayNow => {
+        if (!canPlayNow && !gameIsOver && players.get(currentPlayer) === player) nextTurn();
     });
 }
 
@@ -1080,10 +1130,7 @@ async function nextTurn(skipAutoDraw = false) {
     io.emit('notCalledUnoYou');
 
     if(!skipAutoDraw) {
-        let hasCard = canPlay(currentPlayer, ['none']);
-        if(!hasCard) {
-            autoDraw(currentPlayer);
-        }
+        drawIfStuck(currentPlayer);
         // Only clear the stack state on a normal turn advance; when skipAutoDraw
         // is true the caller (offerStack, offerSkipResponse, etc.) is responsible
         // for managing requiredPlay and stackType.
@@ -1143,14 +1190,11 @@ async function startGame() {
     createDeck();
     dealHands();
 
-    // If the first player has nothing to play, draw for them before the turn starts
-    let hasCard = canPlay(currentPlayer, ['none']);
-    if(!hasCard) {
-        await autoDraw(currentPlayer);
-    }
-
     io.emit('turnChange', currentPlayerID);
     turnStartTime = Date.now();
+
+    // If the first player has nothing to play, draw for them
+    drawIfStuck(currentPlayer);
 }
 
 // ── Admin tools ───────────────────────────────────────────────────────────────
@@ -1234,7 +1278,7 @@ function buildAdminState() {
             topCard: discardPile.length ? discardPile[discardPile.length - 1] : null,
             handsPlayed,
         },
-        options: { playWildDraw4, stackDraw2, skipDraw2, reverseDraw2, skipSkip, stackDraw4, skipDraw4, reverseDraw4 },
+        options: currentOptions(),
         players: Array.from(players.values())
             .sort((a, b) => a.PlayerID - b.PlayerID)
             .map(p => ({
@@ -1350,7 +1394,7 @@ function runAdminAction(type, p) {
             io.emit('renderOpponentCard', pl.PlayerID);
             io.emit('cardDrawn');
             emitPileStatus();
-            logEvent(`${pl.Name} was dealt a card (admin)`, 'draw', [pl.Name]);
+            logEvent([pl.Name + ' was dealt a ', cardPart(card.Color, card.Type), ' (admin)'], 'draw', [pl.Name]);
             return ok(`Gave ${pl.Name} a ${card.Color} ${card.Type}`);
         }
 
