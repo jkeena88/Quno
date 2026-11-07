@@ -67,7 +67,18 @@ function renderPlayerList(lobbyPlayers, hostName) {
 
 collapseButton.addEventListener('click', () => {
     sidePanel.classList.toggle('collapsed');
+    saveSetting('quno-panel-collapsed', sidePanel.classList.contains('collapsed'));
+    // the game area changes width as the panel animates; re-fit once it settles
+    setTimeout(() => { scheduleOpponentRefit(); placeScoreboard(); }, 300);
 });
+
+// Restore the side panel's collapsed state without animating it on page load
+if (loadSetting('quno-panel-collapsed') === 'true') {
+    sidePanel.style.transition = 'none';
+    sidePanel.classList.add('collapsed');
+    void sidePanel.offsetWidth;
+    sidePanel.style.transition = '';
+}
 
 // ── Socket event handlers ──
 
@@ -111,6 +122,7 @@ socket.on('rejoinState', function(state) {
     }
 
     createPlayersUI(state.playerList);
+    setScores(state.playerList);
 
     playersInLobby = state.playersInLobby;
     renderPlayerList(state.playersInLobby, state.hostName);
@@ -131,6 +143,7 @@ socket.on('rejoinState', function(state) {
     if (state.topCard) {
         let cardObj = getCardUI(state.topCard);
         cardObj.id = 'discard';
+        cardObj.style.rotate = tilt(state.topCard.ID);
         let discard = document.getElementById('discard');
         discard.parentNode.replaceChild(cardObj, discard);
         applyWildOverlay(state.topCard.Color === 'black' ? state.currentColor : null);
@@ -234,6 +247,7 @@ socket.on('gameStarted', function(playerList) {
     if (self) playerId = self.PlayerID;
 
     createPlayersUI(playerList);
+    setScores(playerList);
 });
 
 // Show a holding message when the player joins mid-hand and must wait for the next deal
@@ -281,6 +295,8 @@ function updateWaitingOverlay() {
 socket.on('playerLeft', function({ playerId: leftPlayerId }) {
     const panel = document.getElementById('player_' + leftPlayerId);
     if (panel) panel.remove();
+    scores.delete(leftPlayerId);
+    renderScoreboard();
 });
 
 // The admin removed one of our cards
@@ -372,17 +388,176 @@ socket.on('gameStatus', function({ cardsToDraw, playDirection }) {
     updateDirectionIndicator(cardsToDraw, playDirection);
 });
 
+// ── Score summary ──
+// A small card beside the table: everyone's name and points, highest first.
+const scores = new Map(); // PlayerID -> { name, points }
+
+// Clicking the scores opens the stats window
+document.getElementById('scoreboard').addEventListener('click', () => requestStats());
+document.getElementById('scoreboard').addEventListener('keydown', e => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); requestStats(); }
+});
+
+function setScores(playerList) {
+    scores.clear();
+    playerList.forEach(p => scores.set(p.PlayerID, { name: p.Name, points: p.Points }));
+    renderScoreboard();
+}
+
+// Medal for whoever has the most points, poop for whoever has the fewest.
+// Tied players share it, and nobody gets one when everyone is tied.
+function scoreBadge(points, allPoints) {
+    const max = Math.max(...allPoints);
+    const min = Math.min(...allPoints);
+    if (max === min) return '';
+    if (points === max) return '🥇';
+    if (points === min) return '💩';
+    return '';
+}
+
+function renderScoreboard() {
+    const box = document.getElementById('scoreboard');
+    const rows = document.getElementById('scoreboard-rows');
+    const list = Array.from(scores.values())
+        .sort((a, b) => (b.points - a.points) || a.name.localeCompare(b.name));
+
+    box.classList.toggle('has-scores', list.length > 0);
+    rows.textContent = '';
+
+    list.forEach(p => {
+        const rank = list.findIndex(q => q.points === p.points) + 1; // tied players share a rank
+        const row = document.createElement('div');
+        row.className = 'score-row' + (p.name === playerName ? ' own' : '') + (rank === 1 && p.points > 0 ? ' leader' : '');
+
+        // Names go in via textContent, so they are never parsed as HTML
+        const rankEl = document.createElement('span');
+        rankEl.className = 'score-rank';
+        rankEl.textContent = rank;
+        const nameEl = document.createElement('span');
+        nameEl.className = 'score-name';
+        nameEl.textContent = p.name;
+        nameEl.title = p.name;
+        const pointsEl = document.createElement('span');
+        pointsEl.className = 'score-points';
+        pointsEl.textContent = p.points;
+
+        const badge = scoreBadge(p.points, list.map(q => q.points));
+        if (badge) {
+            const badgeEl = document.createElement('span');
+            badgeEl.className = 'score-badge';
+            badgeEl.textContent = badge;
+            row.append(rankEl, nameEl, badgeEl, pointsEl);
+        } else {
+            row.append(rankEl, nameEl, pointsEl);
+        }
+        rows.appendChild(row);
+    });
+
+    placeScoreboard();
+}
+
+// Put the card beside the table when there's room, otherwise leave it as a row above the table.
+// Beside means flush right, or just right of any player it would otherwise overlap.
+function placeScoreboard() {
+    const box = document.getElementById('scoreboard');
+    if (!box || !box.classList.contains('has-scores')) return;
+    const main = box.parentElement;
+    const area = box.closest('.game-content') || document.body;
+
+    box.classList.add('beside');
+    box.style.left = '';
+
+    const mainRect = main.getBoundingClientRect();
+    const boxRect = box.getBoundingClientRect();
+    const areaRight = area.getBoundingClientRect().left + area.clientWidth - 12;
+    const preferredRight = mainRect.right - parseFloat(getComputedStyle(main).paddingRight || 0);
+
+    // Everything the card must stay clear of: the player panels, both piles, the direction
+    // arrow and the cards themselves (a hand can spill out of its panel)
+    const things = [
+        ...Array.from(document.querySelectorAll('.playerOpponent, .playerSelf')).filter(el => el.querySelector('.player')),
+        ...document.querySelectorAll('.playArea1, .playArea2, .direction-indicator, .hand .card'),
+    ];
+    const inTheWay = things
+        .map(el => el.getBoundingClientRect())
+        .filter(r => r.width && r.bottom > boxRect.top && r.top < boxRect.bottom);
+    const clearOfPlayers = Math.max(0, ...inTheWay.map(r => r.right)) + 12;
+    const left = Math.max(clearOfPlayers, preferredRight - boxRect.width);
+
+    if (left + boxRect.width > areaRight) {
+        box.classList.remove('beside'); // no room beside the table
+        return;
+    }
+    box.style.left = (left - mainRect.left) + 'px';
+}
+
+// Re-place the score card whenever anything it depends on changes size: the table's panels
+// (hands growing, names, fonts loading), the window, or the card itself
+let placeQueued = false;
+function schedulePlaceScoreboard() {
+    if (placeQueued) return;
+    placeQueued = true;
+    requestAnimationFrame(() => { placeQueued = false; placeScoreboard(); });
+}
+
+if (window.ResizeObserver) {
+    const watcher = new ResizeObserver(schedulePlaceScoreboard);
+    document.querySelectorAll('main, #scoreboard, .grid-item').forEach(el => watcher.observe(el));
+}
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(schedulePlaceScoreboard);
+
 // ── Pile heights ──
 // Draw pile shows up to 4 layers, discard pile up to 3 (top card + 2 beneath)
+// Draw pile thickness: two 1px edge layers per card, up to 7 cards' worth, so a small pile
+// is thin and a full one looks tall
+function pileShadow(cardCount) {
+    const layers = 2 * Math.min(cardCount, 7) - 1;
+    if (layers < 1) return '';
+    const edges = [];
+    for (let i = 1; i <= layers; i++) {
+        edges.push(`${i}px ${i}px 0 var(${i % 2 ? '--stack-edge-a' : '--stack-edge-b'})`);
+    }
+    edges.push(`${layers + 1}px ${layers + 2}px ${layers + 4}px rgba(0, 0, 0, 0.3)`);
+    return edges.join(', ');
+}
+
+// Discard pile: cards loosely scattered under the top one, one per card actually in the pile
+// (up to the number of entries here). Deeper cards are messier.
+const DISCARD_SCATTER = [
+    { x: -3, y: 2, r: -6 }, { x: 3, y: -1, r: 5 }, { x: -5, y: -3, r: -10 },
+    { x: 5, y: 3, r: 9 }, { x: -1, y: 5, r: -3 }, { x: 2, y: -5, r: 12 },
+];
+
+function updateDiscardUnderlay(discardArea, discardCount) {
+    const under = Math.min(Math.max(discardCount - 1, 0), DISCARD_SCATTER.length);
+    if (discardArea.dataset.under === String(under)) return;
+    discardArea.dataset.under = under;
+    discardArea.querySelectorAll('.discard-under').forEach(el => el.remove());
+    for (let i = under - 1; i >= 0; i--) { // deepest first
+        const s = DISCARD_SCATTER[i];
+        const el = document.createElement('div');
+        el.className = 'discard-under';
+        el.style.transform = `translate(-50%, -50%) translate(${s.x}px, ${s.y}px) rotate(${s.r}deg)`;
+        discardArea.appendChild(el);
+    }
+}
+
+// A small fixed tilt per card so the top of the discard pile doesn't look perfectly squared
+function tilt(cardId) {
+    return ((cardId * 37) % 9 - 4) + 'deg';
+}
+
 function updatePileVisuals({ deckCount, discardCount }) {
     const pile = document.querySelector('.playArea1 .pile');
     const discardArea = document.querySelector('.playArea2');
     if (pile) {
-        pile.dataset.count = Math.min(deckCount, 4);
+        pile.dataset.count = Math.min(deckCount, 7);
+        pile.style.boxShadow = pileShadow(deckCount);
         pile.title = `${deckCount} ${deckCount === 1 ? 'card' : 'cards'} left in draw pile`;
     }
     if (discardArea) {
-        discardArea.dataset.count = Math.min(discardCount, 3);
+        discardArea.dataset.count = Math.min(discardCount, DISCARD_SCATTER.length + 1);
+        updateDiscardUnderlay(discardArea, discardCount);
         discardArea.title = `${discardCount} ${discardCount === 1 ? 'card' : 'cards'} in discard pile`;
     }
 }
@@ -456,6 +631,12 @@ socket.on('qunoCall', function({ playerId: callerId, kind, result, targets }) {
 socket.on('updateScore', function(player, points, handsWon) {
     document.getElementById('points_' + player).innerHTML = 'Points: ' + points;
     document.getElementById('handsWon_' + player).innerHTML = 'Hands Won: ' + handsWon;
+
+    const entry = scores.get(player);
+    if (entry) {
+        entry.points = points;
+        renderScoreboard();
+    }
 });
 
 socket.on('gameOver', function(playerName) {
@@ -631,8 +812,15 @@ socket.on('logMessage', function(entry) {
 // ── Log filters ──
 // A dropdown of checkboxes with a "Select all" row. Anything not unchecked counts as selected,
 // so new items (such as a player who joins later) start out selected.
-function createMultiSelect(root, label, onChange) {
+function createMultiSelect(root, label, onChange, storageKey) {
     const deselected = new Set();
+    // With a storageKey, the unchecked items are remembered between visits
+    if (storageKey) {
+        try { JSON.parse(loadSetting(storageKey) || '[]').forEach(v => deselected.add(v)); } catch (e) {}
+    }
+    const saveSelection = () => {
+        if (storageKey) saveSetting(storageKey, JSON.stringify(Array.from(deselected)));
+    };
     let items = [];   // [{ value, text, dot? }]
     let allCb = null;
     let itemCbs = [];
@@ -692,6 +880,7 @@ function createMultiSelect(root, label, onChange) {
             deselected.clear();
             if (!selectAll) items.forEach(i => deselected.add(i.value));
             itemCbs.forEach(cb => { cb.checked = selectAll; });
+            saveSelection();
             sync();
             onChange();
         });
@@ -701,6 +890,7 @@ function createMultiSelect(root, label, onChange) {
             cb.checked = !deselected.has(item.value);
             cb.addEventListener('change', () => {
                 if (cb.checked) deselected.delete(item.value); else deselected.add(item.value);
+                saveSelection();
                 sync();
                 onChange();
             });
@@ -747,7 +937,7 @@ function applyLogFilters() {
     });
 }
 
-const typeFilter = createMultiSelect(document.getElementById('filter-types'), 'Types', applyLogFilters);
+const typeFilter = createMultiSelect(document.getElementById('filter-types'), 'Types', applyLogFilters, 'quno-log-types');
 typeFilter.setItems([
     { value: 'play', text: 'Play', dot: 'play' },
     { value: 'draw', text: 'Draw', dot: 'draw' },
@@ -1123,37 +1313,96 @@ function layoutHand(player) {
 
     } else {
         // ── Opponent hand ──
-        hand.innerHTML = '';
-
-        if (cardCount <= 1) {
-            cards.forEach(card => { card.style.marginLeft = '0px'; hand.appendChild(card); });
-            return;
-        }
-
-        const MIN_MARGIN = -82;  // starting overlap at low card counts
-
-        const gridCell = hand.closest('.playerOpponent, .playerSelf');
-        const containerW = (gridCell ? gridCell.offsetWidth : hand.offsetWidth) || 200;
-        const usableW = containerW - 10;
-
-        // Margins aren't scaled by the card's transform, so each card advances by
-        // CSS_CARD_W + its right margin + marginLeft. Solve for the margin that
-        // makes the whole fan fit inside the cell.
-        const fitMargin = (usableW - VIS_W) / (cardCount - 1) - CSS_CARD_W - CARD_MARGIN_R;
-
-        // No lower limit: always compress as much as needed to stay inside the cell
-        const margin = Math.min(MIN_MARGIN, fitMargin);
-
-        cards.forEach((card, i) => {
-            card.style.marginLeft = (i === 0 ? 0 : margin) + 'px';
-            hand.appendChild(card);
-        });
+        // Spacing is worked out for all opponents together (see refitOpponentHands);
+        // this is just the starting point until that runs.
+        layoutOpponentHand(hand, 1);
     }
+}
+
+// Opponent hands: how far apart the cards sit (px). Neighbouring cards always overlap a bit
+// (never more than `cap` apart). t runs from 0 (as tight as it ever gets) to 1 (as loose as
+// allowed). With fillCell, a hand may also spread out to use the width its cell already has.
+// Revealed hands get a wider range so the faces can be read.
+function layoutOpponentHand(hand, t, fillCell = false) {
+    const CSS_CARD_W = 107, VIS_W = CSS_CARD_W * 0.6, CARD_MARGIN_R = 3;
+    const cards = Array.from(hand.children);
+    const count = cards.length;
+
+    if (count <= 1) {
+        cards.forEach(card => { card.style.marginLeft = '0px'; card.style.marginRight = ''; });
+        return;
+    }
+
+    const revealed = !!hand.dataset.revealed;
+    const cap = revealed ? 46 : 34;
+    const tightest = revealed ? 12 : 8;
+    let advance = tightest + t * (cap - tightest);
+
+    if (fillCell) {
+        const cell = hand.closest('.playerOpponent');
+        const usableW = (cell ? cell.clientWidth : 0) - 20; // minus the hand's left and right padding
+        const fitAdvance = (usableW - VIS_W) / (count - 1);
+        advance = Math.max(advance, Math.min(cap, fitAdvance));
+    }
+
+    // Margins aren't scaled by the card's transform, so a card's layout step is
+    // CSS_CARD_W + its right margin + marginLeft. Solve for the margin that gives the advance.
+    const margin = advance - CSS_CARD_W - CARD_MARGIN_R;
+
+    // The last card's layout box is wider than what's drawn (it's scaled down), so pull its
+    // right margin in; otherwise the hand would claim ~45px more width than it uses.
+    const trailingMargin = VIS_W - CSS_CARD_W - CARD_MARGIN_R;
+
+    cards.forEach((card, i) => {
+        card.style.marginLeft = (i === 0 ? 0 : margin) + 'px';
+        card.style.marginRight = (i === count - 1) ? trailingMargin + 'px' : '';
+    });
+}
+
+// Space out every opponent's hand: as loose as possible, but keeping the table inside its
+// area (the grid's cells grow with their contents, so the widest hand sets the cell width).
+function refitOpponentHands() {
+    const grid = document.getElementById('players');
+    const hands = Array.from(document.querySelectorAll('.playerOpponent .hand'));
+    if (!grid || !hands.length) return;
+
+    // Cells can run past the grid's own width (some columns size to their contents), so the
+    // real limit is the right edge of the visible game area (leaving a small gutter)
+    const area = grid.closest('.game-content') || document.body;
+    const areaRight = () => area.getBoundingClientRect().left + area.clientWidth - 12;
+    const cells = Array.from(document.querySelectorAll('.playerOpponent'));
+    const widestRight = () => Math.max(...cells.map(c => c.getBoundingClientRect().right));
+
+    let t = 1;
+    for (let step = 20; step >= 0; step--) {
+        t = step / 20;
+        hands.forEach(h => layoutOpponentHand(h, t));
+        if (widestRight() <= areaRight()) break;
+    }
+
+    // Hands with fewer cards can spread across their cell's width without widening it
+    const before = widestRight();
+    hands.forEach(h => layoutOpponentHand(h, t, true));
+    if (widestRight() > before + 1) hands.forEach(h => layoutOpponentHand(h, t));
+
+    placeScoreboard();
 }
 
 function repositionCards(player) {
     layoutHand(player);
     scheduleOpponentRefit();
+    updateCardCounts();
+    schedulePlaceScoreboard();
+}
+
+// The "7 cards" text under each hand, taken from the cards actually shown
+function updateCardCounts() {
+    document.querySelectorAll('.card-count').forEach(el => {
+        const hand = document.getElementById('hand_' + el.id.replace('cards_', ''));
+        const n = hand ? hand.children.length : 0;
+        el.textContent = n + (n === 1 ? ' card' : ' cards');
+        el.classList.toggle('one', n === 1);
+    });
 }
 
 // Cell widths are shared between players, so when any hand changes (or the window
@@ -1170,17 +1419,12 @@ function scheduleOpponentRefit() {
     refitQueued = true;
     requestAnimationFrame(() => {
         refitQueued = false;
-        for (let pass = 0; pass < 3; pass++) {
-            const before = opponentCellWidths();
-            document.querySelectorAll('.playerOpponent .hand').forEach(h => {
-                layoutHand({ SocketID: null, PlayerID: h.id.replace('hand_', '') });
-            });
-            if (opponentCellWidths() === before) break;
-        }
+        refitOpponentHands();
     });
 }
 
 window.addEventListener('resize', scheduleOpponentRefit);
+window.addEventListener('resize', placeScoreboard);
 
 // Highlight playable cards and dim unplayable ones based on the current game state
 function updatePlayableCards(topCard, currentColor) {
@@ -1254,6 +1498,7 @@ socket.on('discardCard', function(card, player) {
 
     let cardObj = getCardUI(card);
     cardObj.id = 'discard';
+    cardObj.style.rotate = tilt(card.ID);
 
     // Initial deal — no animation, just swap the placeholder immediately
     if (player == null) {
@@ -1312,12 +1557,60 @@ socket.on('demoted', function() {
 
 // ── Persistence ──
 
+// Small localStorage wrappers; storage can be unavailable (e.g. private browsing), so failures are ignored
+function loadSetting(key) {
+    try { return localStorage.getItem(key); } catch (e) { return null; }
+}
+
+function saveSetting(key, value) {
+    try { localStorage.setItem(key, value); } catch (e) {}
+}
+
+// Renaming: the server checks the name is free, then tells us (and everyone else)
+function changeName() {
+    const requested = document.getElementById('player-name').value.trim();
+    document.getElementById('name-msg').textContent = '';
+    if (!requested || requested === playerName) return;
+    socket.emit('changeName', requested);
+}
+
+socket.on('nameAccepted', function(newName) {
+    playerName = newName;
+    savePlayerName(newName);
+    document.getElementById('player-name').value = newName;
+    document.getElementById('header-name').textContent = newName;
+    document.getElementById('name-msg').textContent = '';
+    closePopover('name-popover', 'nameToggle');
+});
+
+socket.on('nameRejected', function(message) {
+    document.getElementById('name-msg').textContent = message;
+});
+
+// Someone (maybe us) renamed: update their name on the table
+socket.on('nameChanged', function({ playerId: renamedId, newName }) {
+    const panel = document.getElementById('player_' + renamedId);
+    const nameEl = panel && panel.querySelector('.name');
+    if (nameEl) nameEl.textContent = newName;
+
+    const entry = scores.get(renamedId);
+    if (entry) {
+        entry.name = newName;
+        renderScoreboard();
+    }
+});
+
+document.getElementById('btn-rename').addEventListener('click', changeName);
+document.getElementById('player-name').addEventListener('keydown', e => {
+    if (e.key === 'Enter') changeName();
+});
+
 function savePlayerName(name) {
-    localStorage.setItem('playerName', name);
+    saveSetting('playerName', name);
 }
 
 function getSavedPlayerName() {
-    return localStorage.getItem('playerName');
+    return loadSetting('playerName');
 }
 
 // ── Game action buttons ──
@@ -1373,8 +1666,16 @@ function createPlayersUI(players) {
         div_hands_won.innerHTML = 'Hands Won: ' + players[i].HandsWon;
         div_player.appendChild(div_player_name);
         div_player.appendChild(div_hand);
-        div_player.appendChild(div_points);
-        div_player.appendChild(div_hands_won);
+
+        // Footer row: points, how many cards are in the hand, hands won
+        const div_footer = document.createElement('div');
+        div_footer.className = 'player-footer';
+        const div_cards = document.createElement('div');
+        div_cards.className = 'card-count';
+        div_cards.id = 'cards_' + players[i].PlayerID;
+        div_cards.textContent = '0 cards';
+        div_footer.append(div_points, div_cards, div_hands_won);
+        div_player.appendChild(div_footer);
         if(players[i].SocketID == socketId) {
             document.getElementById('playerSelf').appendChild(div_player);
         } else {
@@ -1446,11 +1747,13 @@ function init() {
         if (playerName === null || playerName === "") {
             playerName = defaultName;
         } else {
-            savePlayerName(playerName);
+            savePlayerName(playerName.substring(0, 29));
         }
     }
 
     playerName = playerName.substring(0, 29);
+    document.getElementById('player-name').value = playerName;
+    document.getElementById('header-name').textContent = playerName;
 
     socket.connect();
 }
@@ -1491,9 +1794,61 @@ function showResetConfirm() {
     };
 }
 
+// Master sound settings (volume slider and mute in the side panel), remembered between visits
+let soundVolume = 1;   // 0 to 1
+let soundMuted = false;
+
+(function initSoundSettings() {
+    const slider = document.getElementById('sound-volume');
+    const label = document.getElementById('sound-volume-label');
+    const mute = document.getElementById('sound-mute');
+
+    try {
+        const saved = parseFloat(localStorage.getItem('quno-volume'));
+        if (!isNaN(saved)) soundVolume = Math.min(1, Math.max(0, saved));
+        soundMuted = localStorage.getItem('quno-muted') === 'true';
+    } catch (e) {}
+
+    // Waves become a slash on the header icon when sound is muted or at zero
+    function updateIcon() {
+        document.getElementById('soundToggle').classList.toggle('is-muted', soundMuted || soundVolume === 0);
+    }
+
+    function showSettings() {
+        slider.value = Math.round(soundVolume * 100);
+        label.textContent = Math.round(soundVolume * 100) + '%';
+        mute.checked = soundMuted;
+        updateIcon();
+    }
+
+    slider.addEventListener('input', () => {
+        soundVolume = slider.value / 100;
+        label.textContent = slider.value + '%';
+        try { localStorage.setItem('quno-volume', soundVolume); } catch (e) {}
+        updateIcon();
+    });
+
+    mute.addEventListener('change', () => {
+        soundMuted = mute.checked;
+        try { localStorage.setItem('quno-muted', soundMuted); } catch (e) {}
+        updateIcon();
+    });
+
+    showSettings();
+
+    // The chosen draw sound is remembered too
+    const drawSound = document.getElementById('draw-sound');
+    const savedSound = loadSetting('quno-draw-sound');
+    if (savedSound && Array.from(drawSound.options).some(o => o.value === savedSound)) {
+        drawSound.value = savedSound;
+    }
+    drawSound.addEventListener('change', () => saveSetting('quno-draw-sound', drawSound.value));
+})();
+
 function playSound(src, volume=1.0) {
+    if (soundMuted || soundVolume === 0) return;
     const audio = new Audio(src);
-    audio.volume = volume;
+    audio.volume = Math.min(1, volume * soundVolume);
     audio.play();
 }
 
@@ -1575,6 +1930,7 @@ function renderHandSummary(summary, isReview) {
     const handTurnRows = buildTurnRows('handCardsPlayed', 'handTurnTime');
     const matchTurnRows = buildTurnRows('matchCardsPlayed', 'matchTurnTime');
 
+    const scoredAll = ps.map(p => p.pointsScored);
     const standingRows = ps
         .slice()
         .sort((a, b) => (b.pointsScored - a.pointsScored) || (b.netPoints - a.netPoints))
@@ -1582,7 +1938,7 @@ function renderHandSummary(summary, isReview) {
             const netColor = p.netPoints >= 0 ? 'color:#3db87a;font-weight:600;' : 'color:#c94f5f;font-weight:600;';
             const netStr = (p.netPoints >= 0 ? '+' : '') + p.netPoints;
             return `<tr${rowClass(p.name)}>
-                <td style="${tdStyle}font-weight:600;">${truncate(p.name)}</td>
+                <td style="${tdStyle}font-weight:600;">${truncate(p.name)} ${scoreBadge(p.pointsScored, scoredAll)}</td>
                 <td style="${tdRight}">${p.pointsScored}</td>
                 <td style="${tdRight}">${p.pointsGivenUp}</td>
                 <td style="${tdRight}${netColor}">${netStr}</td>
@@ -1751,6 +2107,39 @@ masterCheckbox.addEventListener('click', () => {
     const isChecked = masterCheckbox.checked;
     controlledCheckboxes.forEach(checkbox => { checkbox.checked = isChecked; });
 });
+
+// ── Header popovers (name, sound) ──
+function closePopover(popoverId, buttonId) {
+    document.getElementById(popoverId).hidden = true;
+    document.getElementById(buttonId).setAttribute('aria-expanded', 'false');
+}
+
+function setupPopover(popoverId, buttonId, focusId) {
+    const pop = document.getElementById(popoverId);
+    const btn = document.getElementById(buttonId);
+
+    btn.addEventListener('click', () => {
+        const open = pop.hidden;
+        pop.hidden = !open;
+        btn.setAttribute('aria-expanded', String(open));
+        if (open && focusId) {
+            const field = document.getElementById(focusId);
+            field.focus();
+            if (field.select) field.select();
+        }
+    });
+
+    // Click elsewhere, or press Escape, to close
+    document.addEventListener('click', e => {
+        if (!pop.hidden && !pop.contains(e.target) && !btn.contains(e.target)) closePopover(popoverId, buttonId);
+    });
+    pop.addEventListener('keydown', e => {
+        if (e.key === 'Escape') { closePopover(popoverId, buttonId); btn.focus(); }
+    });
+}
+
+setupPopover('name-popover', 'nameToggle', 'player-name');
+setupPopover('sound-popover', 'soundToggle', 'sound-volume');
 
 setOptionsEditable(false);
 init();

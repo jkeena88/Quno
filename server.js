@@ -504,6 +504,39 @@ function onConnection(socket) {
         if (socket.id !== playerA) return; // host only
         applyOptions(data.options, socket.playerName);
     });
+
+    // A player renames themselves; their seat, hand and host role carry over
+    socket.on('changeName', (requested) => {
+        const oldName = socket.playerName;
+        if (!oldName || typeof requested !== 'string') return;
+        const newName = requested.trim().substring(0, 29);
+        if (!newName || newName === oldName) return;
+
+        // Names identify players (rejoining works by name), so they must be unique
+        const taken = Array.from(io.sockets.sockets.values()).some(s => s !== socket && s.playerName === newName) ||
+            Array.from(players.values()).some(p => p.Name === newName) ||
+            playersInLobby.includes(newName);
+        if (taken) {
+            socket.emit('nameRejected', newName + ' is already taken');
+            return;
+        }
+
+        socket.playerName = newName;
+        playersInLobby = playersInLobby.map(n => n === oldName ? newName : n);
+        const player = players.get(socket.id);
+        if (player) player.Name = newName;
+        if (socket.id === playerA) hostName = newName;
+        if (stackContributions.has(oldName)) {
+            stackContributions.set(newName, stackContributions.get(oldName));
+            stackContributions.delete(oldName);
+        }
+
+        socket.emit('nameAccepted', newName);
+        io.emit('nameChanged', { playerId: player ? player.PlayerID : -1, newName });
+        io.emit('setHost', hostName);
+        io.emit('newPlayer', { players: playersInLobby, host: hostName });
+        logEvent(`${oldName} changed their name to ${newName}`, 'room', [newName]);
+    });
 }
 
 // Apply a list of enabled option names and tell everyone

@@ -100,9 +100,9 @@
     background: transparent;
 }
 
-/* ── Dark mode toggle button ── */
+/* ── Header controls: name, sound, theme ── */
 
-.theme-toggle {
+.header-controls {
     position: absolute;
     right: 16px;
     top: 50%;
@@ -110,16 +110,25 @@
     display: flex;
     align-items: center;
     gap: 8px;
+}
+
+.header-item { position: relative; }
+
+.header-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    height: 32px;
+    padding: 0 11px;
     background: rgba(255,255,255,0.10);
     border: 1px solid rgba(255,255,255,0.18);
     border-radius: 999px;
-    padding: 5px 14px 5px 10px;
-    cursor: pointer;
-    color: rgba(255,255,255,0.75);
+    color: rgba(255,255,255,0.85);
     font-family: 'DM Sans', sans-serif;
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 500;
-    letter-spacing: 0.02em;
+    cursor: pointer;
     transition: background 0.2s, border-color 0.2s, color 0.2s;
     white-space: nowrap;
     -webkit-tap-highlight-color: transparent;
@@ -127,46 +136,77 @@
     user-select: none;
 }
 
-.theme-toggle:hover {
-    background: rgba(255,255,255,0.16);
+.header-btn:hover,
+.header-btn[aria-expanded="true"] {
+    background: rgba(255,255,255,0.20);
+    border-color: rgba(255,255,255,0.32);
     color: #fff;
-    border-color: rgba(255,255,255,0.28);
 }
 
-.theme-toggle-track {
-    width: 28px;
-    height: 16px;
-    border-radius: 999px;
-    background: rgba(255,255,255,0.2);
-    position: relative;
-    transition: background 0.25s;
-    flex-shrink: 0;
-}
+.header-btn:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.icon-btn { width: 32px; padding: 0; }
+.name-btn #header-name { max-width: 140px; overflow: hidden; text-overflow: ellipsis; }
 
-.theme-toggle-thumb {
-    width: 12px;
-    height: 12px;
-    border-radius: 50%;
-    background: #fff;
+/* The theme button shows the mode a click switches to: moon in light mode, sun in dark mode */
+.icon-sun { display: none; }
+[data-theme="dark"] .icon-moon { display: none; }
+[data-theme="dark"] .icon-sun { display: block; }
+
+/* The sound icon swaps its waves for a slash when muted or at zero volume */
+.sound-slash { display: none; }
+#soundToggle.is-muted .sound-waves { display: none; }
+#soundToggle.is-muted .sound-slash { display: block; }
+
+.popover {
     position: absolute;
-    top: 2px;
-    left: 2px;
-    transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
-    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
-}
-
-[data-theme="dark"] .theme-toggle-track {
-    background: rgba(100, 140, 255, 0.5);
-}
-
-[data-theme="dark"] .theme-toggle-thumb {
-    transform: translateX(12px);
-}
-
-.theme-toggle-icon {
+    top: calc(100% + 10px);
+    right: 0;
+    width: 280px;
+    padding: 14px;
+    background: var(--bg-surface);
+    color: var(--text-primary);
+    border: 1px solid var(--border-medium);
+    border-radius: 12px;
+    box-shadow: var(--shadow-modal);
+    font-family: 'DM Sans', sans-serif;
     font-size: 13px;
-    line-height: 1;
+    font-weight: 400;
+    z-index: 2000;
 }
+
+.popover[hidden] { display: none; }
+
+.popover-label {
+    margin-bottom: 8px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--text-secondary);
+}
+
+.popover-gap { margin-top: 14px; }
+.popover-help { font-size: 12px; color: var(--text-secondary); }
+
+.popover input[type="text"],
+.popover select {
+    font: inherit;
+    padding: 6px 10px;
+    background: var(--bg-surface);
+    color: var(--text-primary);
+    border: 1px solid var(--border-medium);
+    border-radius: var(--radius-sm);
+}
+
+.name-row { display: flex; align-items: center; gap: 6px; }
+.name-row input[type="text"] { flex: 1; min-width: 0; }
+.name-row .btn { margin: 0; padding: 6px 14px; font-size: 13px; }
+.name-msg { min-height: 1.2em; margin: 4px 0; font-size: 12px; color: #c94f5f; }
+
+.volume-row label { font-weight: 500; }
+
+.popover select { width: 100%; }
+.popover input[type="text"]:focus { outline: none; border-color: var(--btn-active-bg); }
 
 /* ── Reset & Base ── */
 
@@ -206,12 +246,14 @@ main {
     margin: 0 auto;
     padding: 24px 20px;
     flex: 1;
+    position: relative;
 }
 
 /* ── Header ── */
 
 header {
     position: relative;
+    z-index: 5;               /* keeps the header's popovers above the game area */
     width: 100%;
 }
 
@@ -369,7 +411,8 @@ main #status {
 
 /* ── Stacked-pile look ── */
 
-/* Draw pile: alternating light/dark 1px layers read as the edges of a thick deck */
+/* Draw pile: alternating light/dark 1px layers read as the edges of a thick deck. main.js sets
+   the exact layers from the real card count (this is the fallback before it runs). */
 .playArea1 .pile {
     box-shadow:
         1px 1px 0 var(--stack-edge-a),
@@ -382,12 +425,16 @@ main #status {
         8px 9px 8px rgba(0, 0, 0, 0.3);
 }
 
-/* Discard pile: two slightly rotated cards peek out from under the top card.
-   They only appear once a discard card exists (the top card carries dataCardColor). */
-.playArea2::before,
-.playArea2::after {
-    content: '';
-    display: none;
+/* Empty deck: card back disappears, leaving a dashed outline */
+.playArea1 .pile[data-count="0"] {
+    background-image: none;
+    box-shadow: none;
+    border: 2px dashed var(--border-medium);
+}
+
+/* Discard pile: loosely scattered cards peek out from under the top card (added by main.js,
+   one per card in the pile, up to a few) */
+.discard-under {
     position: absolute;
     top: 50%;
     left: 50%;
@@ -398,55 +445,7 @@ main #status {
     border: 1px solid var(--stack-edge-a);
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
     pointer-events: none;
-}
-
-.playArea2::before {
-    transform: translate(-50%, -50%) rotate(-5deg);
-    z-index: 0;
-}
-
-.playArea2::after {
-    transform: translate(-50%, -50%) rotate(3deg);
     z-index: 1;
-}
-
-/* Draw pile: fewer layers as the deck runs down (4+ = the default above) */
-.playArea1 .pile[data-count="3"] {
-    box-shadow:
-        1px 1px 0 var(--stack-edge-a),
-        2px 2px 0 var(--stack-edge-b),
-        3px 3px 0 var(--stack-edge-a),
-        4px 4px 0 var(--stack-edge-b),
-        5px 5px 0 var(--stack-edge-a),
-        6px 7px 7px rgba(0, 0, 0, 0.3);
-}
-
-.playArea1 .pile[data-count="2"] {
-    box-shadow:
-        1px 1px 0 var(--stack-edge-a),
-        2px 2px 0 var(--stack-edge-b),
-        3px 3px 0 var(--stack-edge-a),
-        4px 5px 6px rgba(0, 0, 0, 0.3);
-}
-
-.playArea1 .pile[data-count="1"] {
-    box-shadow:
-        1px 1px 0 var(--stack-edge-a),
-        2px 3px 4px rgba(0, 0, 0, 0.3);
-}
-
-/* Empty deck: card back disappears, leaving a dashed outline */
-.playArea1 .pile[data-count="0"] {
-    background-image: none;
-    box-shadow: none;
-    border: 2px dashed var(--border-medium);
-}
-
-/* Discard pile: first card lies flat; background cards appear as discards accumulate */
-.playArea2[data-count="2"]::before,
-.playArea2[data-count="3"]::before,
-.playArea2[data-count="3"]::after {
-    display: block;
 }
 
 /* Soft shadow under the top discard so it sits above the cards beneath */
@@ -555,6 +554,24 @@ main #status {
 
 .points { text-align: left; float: left; }
 .hands-won { text-align: right; float: right; }
+
+/* Points, card count and hands won share one row under each hand */
+.player-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+}
+.player-footer .points, .player-footer .hands-won { float: none; margin: 0; }
+.card-count {
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--text-primary);
+    white-space: nowrap;
+}
+.card-count.one { color: #8a5a12; }   /* one card left: Quno time */
+[data-theme="dark"] .card-count.one { color: #e0a94a; }
 
 .name {
     text-align: left;
@@ -1047,8 +1064,29 @@ body:has(#side-panel.collapsed) #waitingOverlay {
     margin-top: 8px;
 }
 
-.config-container {
-    padding-bottom: 10px;
+.volume-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.volume-row input[type="range"] {
+    flex: 1;
+    min-width: 0;
+}
+
+.volume-row span {
+    width: 3.2em;
+    text-align: right;
+}
+
+.mute-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 6px;
+    cursor: pointer;
 }
 
 /* Read-only options (non-host) */
@@ -1212,6 +1250,62 @@ body:has(#side-panel.collapsed) #waitingOverlay {
 
 /* Entries hidden by the log filters */
 .log-filtered { display: none !important; }
+
+/* ── Score summary: a card in the empty right margin beside the table ── */
+.scoreboard {
+    display: none;
+    margin: 10px 0 0;
+    padding: 10px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-card);
+    z-index: 1;
+    cursor: pointer;          /* click for the full stats */
+}
+
+.scoreboard.has-scores { display: block; }
+.scoreboard:hover { border-color: var(--border-medium); }
+.scoreboard:focus-visible { outline: 2px solid var(--btn-active-bg); outline-offset: 2px; }
+
+/* By default the scores are a wrapped row above the table */
+#scoreboard-rows { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+
+/* When there's room, main.js moves the card beside the table (never over a player) and sets its left */
+.scoreboard.beside {
+    position: absolute;       /* top is left automatic so it lines up with the table */
+    margin-top: 28px;         /* the table's own top margin + padding */
+    width: 170px;
+}
+.scoreboard.beside #scoreboard-rows { display: block; }
+
+.scoreboard-title {
+    margin-bottom: 6px;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--text-secondary);
+}
+
+.score-row {
+    display: flex;
+    gap: 8px;
+    padding: 4px 6px;
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.score-row.own { background: rgba(59, 130, 246, 0.18); }
+.score-row.leader .score-name { font-weight: 600; }
+.score-badge { flex: none; }
+.score-rank { width: 12px; color: var(--text-secondary); }
+.score-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.score-points { font-weight: 700; }
+
+/* Opponent hands keep a little room on the right, like the left side */
+.playerOpponent .hand { padding-right: 10px; }
 
 /* ── Quno call bubble ── */
 .player { position: relative; }

@@ -12,13 +12,58 @@
         <div class="game-content">
             <header>
                 <h1>Quno</h1>
-                <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()" aria-label="Toggle dark mode">
-                    <span class="theme-toggle-icon" id="themeIcon">☀️</span>
-                    <div class="theme-toggle-track">
-                        <div class="theme-toggle-thumb"></div>
+                <div class="header-controls">
+                    <div class="header-item">
+                        <button type="button" class="header-btn name-btn" id="nameToggle" aria-haspopup="true" aria-expanded="false" aria-controls="name-popover" title="Change your name">
+                            <span id="header-name"></span>
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20l1-4 11-11 3 3L8 19l-4 1z"/></svg>
+                        </button>
+                        <div class="popover" id="name-popover" hidden>
+                            <div class="popover-label">Your name</div>
+                            <div class="name-row">
+                                <input type="text" id="player-name" maxlength="29" autocomplete="off" aria-label="Your name">
+                                <button type="button" id="btn-rename" class="btn">Change</button>
+                            </div>
+                            <div id="name-msg" class="name-msg"></div>
+                            <div class="popover-help">Shown to the other players. Names must be unique.</div>
+                        </div>
                     </div>
-                    <span id="themeLabel">Light</span>
-                </button>
+                    <div class="header-item">
+                        <button type="button" class="header-btn icon-btn" id="soundToggle" aria-haspopup="true" aria-expanded="false" aria-controls="sound-popover" aria-label="Sound settings" title="Sound">
+                            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path class="sound-waves" d="M16 9a4 4 0 010 6M18.5 6.5a8 8 0 010 11"/><path class="sound-slash" d="M17 9l5 6M22 9l-5 6"/></svg>
+                        </button>
+                        <div class="popover" id="sound-popover" hidden>
+                            <div class="popover-label">Sound</div>
+                            <div class="volume-row">
+                                <label for="sound-volume">Volume</label>
+                                <input type="range" id="sound-volume" min="0" max="100" step="1" value="100">
+                                <span id="sound-volume-label">100%</span>
+                            </div>
+                            <label class="mute-row"><input type="checkbox" id="sound-mute"> Mute sounds</label>
+                            <div class="popover-label popover-gap">Draw sound</div>
+                            <select name="Sound" id="draw-sound" aria-label="Draw sound">
+                                <option value="audio/draw-card01.wav">Draw 01</option>
+                                <option value="audio/draw-card02.ogg">Draw 02</option>
+                                <option value="audio/draw-card03.ogg">Draw 03</option>
+                                <option value="audio/draw-card04.ogg">Draw 04</option>
+                                <option value="audio/gunshot-01.mp3">Gunshot 01</option>
+                                <option value="audio/gunshot-02.wav">Gunshot 02</option>
+                                <option value="audio/gunshot-03.wav">Gunshot 03</option>
+                                <option value="audio/gunshot-04.wav">Gunshot 04</option>
+                                <option value="audio/gunshot-05.mp3">Gunshot 05</option>
+                                <option value="audio/haha.wav">Ha-Ha</option>
+                                <option value="audio/hercules-mulligan.wav">Hercules Mulligan</option>
+                                <option value="audio/laser.wav">Laser</option>
+                                <option value="audio/retro-laser.mp3">Retro Laser</option>
+                                <option value="audio/slip.mp3">Slip</option>
+                            </select>
+                        </div>
+                    </div>
+                    <button type="button" class="header-btn icon-btn" id="themeToggle" onclick="toggleTheme()" aria-label="Switch to dark mode" title="Switch to dark mode">
+                        <svg class="icon-moon" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 019.5 4 8 8 0 1020 14.5z"/></svg>
+                        <svg class="icon-sun" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M5 19l1.5-1.5M17.5 6.5L19 5"/></svg>
+                    </button>
+                </div>
             </header>
             <main>
                 <div class="game-options">
@@ -55,6 +100,11 @@
                 <div class="status" id="playerList"><strong>Players: </strong></div>
 
                 <div class="status" id="status"></div>
+
+                <div id="scoreboard" class="scoreboard" role="button" tabindex="0" title="Click for the full stats" aria-label="Scores (click for the full stats)">
+                    <div class="scoreboard-title">Scores</div>
+                    <div id="scoreboard-rows"></div>
+                </div>
 
                 <div id="players" class="players">
                     <div id="player0" class="grid-item playerOpponent"></div>
@@ -100,29 +150,6 @@
 
             <div><button id="collapse-btn" class="collapse-button">&#9654;</button></div>
 
-            <div class="config-container panel-container" id="config-container">
-
-                <h3>Configuration:</h3>
-                <label for="draw-sound">Draw sound:</label>
-
-                <select name="Sound" id="draw-sound">
-                    <option value="audio/draw-card01.wav">Draw 01</option>
-                    <option value="audio/draw-card02.ogg">Draw 02</option>
-                    <option value="audio/draw-card03.ogg">Draw 03</option>
-                    <option value="audio/draw-card04.ogg">Draw 04</option>
-                    <option value="audio/gunshot-01.mp3">Gunshot 01</option>
-                    <option value="audio/gunshot-02.wav">Gunshot 02</option>
-                    <option value="audio/gunshot-03.wav">Gunshot 03</option>
-                    <option value="audio/gunshot-04.wav">Gunshot 04</option>
-                    <option value="audio/gunshot-05.mp3">Gunshot 05</option>
-                    <option value="audio/haha.wav">Ha-Ha</option>
-                    <option value="audio/hercules-mulligan.wav">Hercules Mulligan</option>
-                    <option value="audio/laser.wav">Laser</option>
-                    <option value="audio/retro-laser.mp3">Retro Laser</option>
-                    <option value="audio/slip.mp3">Slip</option>
-                </select>
-            </div>
-            <hr></hr>
             <div class="panel-container log-panel">
                 <h3>Messages:</h3>
                 <div class="log-filters" id="log-filters">
@@ -165,13 +192,20 @@
         <script type="text/javascript" src="/socket.io/socket.io.js"></script>
         <script type="text/javascript" src="/main.js"></script>
         <script>
+            // Keep the theme button's label in step with the current theme
+            function updateThemeButton(theme) {
+                const btn = document.getElementById('themeToggle');
+                const label = theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode';
+                btn.setAttribute('aria-label', label);
+                btn.title = label;
+            }
+
             // Toggle between light and dark mode and persist the choice
             function toggleTheme() {
                 const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
                 const newTheme = isDark ? 'light' : 'dark';
                 document.documentElement.setAttribute('data-theme', newTheme);
-                document.getElementById('themeIcon').textContent = newTheme === 'dark' ? '🌙' : '☀️';
-                document.getElementById('themeLabel').textContent = newTheme === 'dark' ? 'Dark' : 'Light';
+                updateThemeButton(newTheme);
                 try { localStorage.setItem('quno-theme', newTheme); } catch(e) {}
             }
 
@@ -181,12 +215,7 @@
                     const saved = localStorage.getItem('quno-theme');
                     if (saved === 'dark') {
                         document.documentElement.setAttribute('data-theme', 'dark');
-                        document.addEventListener('DOMContentLoaded', function() {
-                            const icon = document.getElementById('themeIcon');
-                            const label = document.getElementById('themeLabel');
-                            if (icon) icon.textContent = '🌙';
-                            if (label) label.textContent = 'Dark';
-                        });
+                        updateThemeButton('dark');
                     }
                 } catch(e) {}
             })();
