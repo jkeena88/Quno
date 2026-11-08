@@ -207,6 +207,7 @@ function onConnection(socket) {
             });
             if (gameIsOver) {
                 io.to(socket.id).emit('revealHands', revealPayload());
+                if (lastHandSummary) io.to(socket.id).emit('handResult', handResultPayload(lastHandSummary));
             }
             io.emit('newPlayer', { players: playersInLobby, host: hostName });
             logEvent(playerName + ' rejoined the game', 'room', [playerName]);
@@ -1072,6 +1073,11 @@ function drawIfStuck(SocketID) {
     });
 }
 
+// What the table needs to highlight the winner and show who gave up how many points
+function handResultPayload(summary) {
+    return { winner: summary.winner, points: summary.pointsThisHand, breakdown: summary.breakdown };
+}
+
 // Check if the given player has won (empty hand), and end the hand/match if so
 function checkForWin(SocketID) {
     let player = players.get(SocketID);
@@ -1097,6 +1103,7 @@ function checkForWin(SocketID) {
         io.emit('turnChange', -1);
         io.emit('revealHands', revealPayload());
         io.emit('handSummary', summary);
+        io.emit('handResult', handResultPayload(summary));
         io.emit('gameOver', winner.Name);
         logEvent(winner.Name + ' won the game', 'room', [winner.Name]);
     }

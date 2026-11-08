@@ -573,7 +573,8 @@ socket.on('pileStatus', updatePileVisuals);
 
 socket.on('turnChange', function(PlayerID) {
     document.querySelectorAll('.player').forEach(p => p.classList.remove('active'));
-    document.getElementById('player_' + PlayerID).classList.add('active');
+    const activeEl = document.getElementById('player_' + PlayerID); // none when the hand is over (-1)
+    if (activeEl) activeEl.classList.add('active');
 
     if(PlayerID == playerId) {
         playSound('audio/turn-change.wav');
@@ -644,6 +645,42 @@ socket.on('updateScore', function(player, points, handsWon) {
         entry.points = points;
         renderScoreboard();
     }
+});
+
+// After a hand: ring and crown on the winner, the points they won in their empty hand area,
+// and a red chip on everyone else showing the points they gave up
+socket.on('handResult', function({ winner, points, breakdown }) {
+    document.querySelectorAll('.player').forEach(panel => {
+        const nameEl = panel.querySelector('.name');
+        if (!nameEl) return;
+        const name = nameEl.textContent;
+
+        if (name === winner) {
+            panel.classList.add('winner');
+            const note = document.createElement('div');
+            note.className = 'winner-note';
+            const label = document.createElement('span');
+            label.className = 'winner-label';
+            label.textContent = 'Winner';
+            const pts = document.createElement('span');
+            pts.className = 'winner-points';
+            pts.textContent = '+' + points;
+            const sub = document.createElement('span');
+            sub.className = 'winner-sub';
+            sub.textContent = points === 1 ? 'point this hand' : 'points this hand';
+            note.append(label, pts, sub);
+            panel.appendChild(note);
+        } else {
+            const lost = breakdown.find(b => b.name === name);
+            if (lost && lost.points > 0) {
+                const chip = document.createElement('span');
+                chip.className = 'lost-chip';
+                chip.textContent = '\u2212' + lost.points;
+                chip.title = 'Points given up this hand';
+                panel.appendChild(chip);
+            }
+        }
+    });
 });
 
 socket.on('gameOver', function(playerName) {
