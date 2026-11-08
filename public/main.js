@@ -69,7 +69,7 @@ collapseButton.addEventListener('click', () => {
     sidePanel.classList.toggle('collapsed');
     saveSetting('quno-panel-collapsed', sidePanel.classList.contains('collapsed'));
     // the game area changes width as the panel animates; re-fit once it settles
-    setTimeout(() => { scheduleOpponentRefit(); placeScoreboard(); }, 300);
+    setTimeout(() => { layoutAllHands(); placeScoreboard(); }, 300);
 });
 
 // Restore the side panel's collapsed state without animating it on page load
@@ -295,6 +295,7 @@ function updateWaitingOverlay() {
 socket.on('playerLeft', function({ playerId: leftPlayerId }) {
     const panel = document.getElementById('player_' + leftPlayerId);
     if (panel) panel.remove();
+    collapseUnusedSeats();
     scores.delete(leftPlayerId);
     renderScoreboard();
 });
@@ -456,14 +457,17 @@ function renderScoreboard() {
     placeScoreboard();
 }
 
-// Put the card beside the table when there's room, otherwise leave it as a row above the table.
+// Put the card beside the table (top right) when there's room, otherwise in a row under the header.
 // Beside means flush right, or just right of any player it would otherwise overlap.
 function placeScoreboard() {
     const box = document.getElementById('scoreboard');
     if (!box || !box.classList.contains('has-scores')) return;
-    const main = box.parentElement;
-    const area = box.closest('.game-content') || document.body;
+    const grid = document.getElementById('players');
+    const main = grid.parentElement;
+    const area = main.closest('.game-content') || document.body;
 
+    // Try beside the table first (that's where it lives, outside the grid)
+    if (box.nextElementSibling !== grid) main.insertBefore(box, grid);
     box.classList.add('beside');
     box.style.left = '';
 
@@ -485,7 +489,10 @@ function placeScoreboard() {
     const left = Math.max(clearOfPlayers, preferredRight - boxRect.width);
 
     if (left + boxRect.width > areaRight) {
-        box.classList.remove('beside'); // no room beside the table
+        // No room beside the table: show the scores as a row right under the header
+        box.classList.remove('beside');
+        box.style.left = '';
+        main.insertBefore(box, main.firstElementChild);
         return;
     }
     box.style.left = (left - mainRect.left) + 'px';
@@ -642,9 +649,6 @@ socket.on('updateScore', function(player, points, handsWon) {
 socket.on('gameOver', function(playerName) {
     playSound('audio/game-over.wav');
     gameInProgress = false;
-
-    document.getElementById('status').innerHTML = playerName + ' WON';
-    show('status', 'inline-block');
 
     if(isPlayerA) {
         show('btnDeal', 'inline-block');
@@ -1231,7 +1235,6 @@ function getCardUI(card, player) {
         cardObj.style.backgroundRepeat = 'no-repeat';
 
         // Colorblind accessibility pattern overlay
-        cardObj.style.position = 'relative';
         const patternOverlay = getColorPatternSVG(card.Color);
         if (patternOverlay) cardObj.appendChild(patternOverlay);
 
@@ -1246,185 +1249,94 @@ function getCardUI(card, player) {
     return cardObj;
 }
 
-// Reposition cards within a hand, applying fan overlap.
-// Own hand is sorted by color then type; opponent hands just stack in order.
-//
-// Overlap rules:
-//   - Cards are 107px CSS wide, rendered at scale(0.6) → 64.2px visual width.
-//   - CSS margin-left is pre-scale, so visual overlap = |marginLeft| * 0.6.
-//   - Opponents: minimum starting CSS margin = -70px (~65% overlap).
-//     Cards compress up to 75% visual overlap (CSS -80px) before the hand expands.
-//   - Own hand: minimum starting CSS margin = -57px (~53% overlap).
-//     Cards compress up to 60% visual overlap (CSS -64px) before the hand expands.
-//   - In both cases the hand uses as much available container space as possible
-//     before applying any extra overlap beyond the starting minimum.
-function layoutHand(player) {
-    const hand = document.getElementById('hand_' + player.PlayerID);
-    if (!hand) return;
+// ── Hand layout ──
+// Every seat is a fixed size, so a hand never resizes its panel. Cards are positioned inside
+// the hand: a fan that tightens as it fills, and wraps onto more rows once it can't tighten
+// any further (your own hand, and every hand once it is revealed at the end).
+const HAND_CARD_W = 107 * 0.6;   // drawn width of a card
+const HAND_CARD_H = 160 * 0.6;   // drawn height of a card
+const HAND_ROW_STEP = 36;        // each extra row sits this far below the one above it
+const HAND_LEFT_PAD = 10;
+const HAND_RIGHT_RESERVE = 54;   // room kept on the right for the card-count circle
+const OPPONENT_VISIBLE_CAP = 10; // face-down opponent hands show at most this many card backs
 
+// maxAdvance: the furthest apart neighbouring cards ever sit (so they always overlap a little).
+// minAdvance: the tightest a row gets before the hand wraps onto another row.
+// visible: how many of the hand's cards are shown (the rest stay hidden).
+function placeHand(hand, { maxAdvance, minAdvance, visible }) {
     const cards = Array.from(hand.children);
-    const cardCount = cards.length;
+    cards.forEach((card, i) => { card.style.display = i < visible ? '' : 'none'; });
+    const shown = cards.slice(0, visible);
 
-    // Visual card width at 0.6 scale
-    const CSS_CARD_W = 107;
-    const SCALE      = 0.6;
-    const VIS_W      = CSS_CARD_W * SCALE; // 64.2px
-    const CARD_MARGIN_R = 3;               // the card's right margin from style.css
+    const panel = hand.closest('.player');
+    const usableW = (panel ? panel.clientWidth : hand.clientWidth) - HAND_LEFT_PAD - HAND_RIGHT_RESERVE;
+    const perRowMax = Math.max(1, Math.floor((usableW - HAND_CARD_W) / minAdvance) + 1);
+    const rows = Math.max(1, Math.ceil(shown.length / perRowMax));
+    const perRow = Math.max(1, Math.ceil(shown.length / rows)); // spread evenly over the rows
+    const advance = perRow > 1 ? Math.min(maxAdvance, (usableW - HAND_CARD_W) / (perRow - 1)) : 0;
 
-    if (player.SocketID == socketId) {
-        // ── Own hand ──
-        // Sort by color then type so the fan is visually organised.
+    shown.forEach((card, i) => {
+        card.style.left = (HAND_LEFT_PAD + (i % perRow) * advance) + 'px';
+        card.style.top = (Math.floor(i / perRow) * HAND_ROW_STEP) + 'px';
+    });
+    hand.style.height = (HAND_CARD_H + (rows - 1) * HAND_ROW_STEP + 8) + 'px';
+}
+
+function layoutHandEl(hand) {
+    const cards = Array.from(hand.children);
+
+    if (hand.closest('.playerSelf')) {
+        // Own hand: sorted by color then type so the fan is organised
         cards.sort((a, b) => {
             const colorDiff = a.getAttribute('dataCardColor').localeCompare(b.getAttribute('dataCardColor'));
             if (colorDiff !== 0) return colorDiff;
             return a.getAttribute('dataCardType').localeCompare(b.getAttribute('dataCardType'));
         });
-
-        hand.innerHTML = '';
-
-        if (cardCount <= 1) {
-            cards.forEach(card => { card.style.marginLeft = '0px'; hand.appendChild(card); });
-            return;
-        }
-
-        // CSS margin limits (negative = overlap)
-        const MIN_MARGIN = hand.dataset.revealed ? -57 : -82;  // revealed hands overlap less so faces are readable
-        const MAX_MARGIN = -64;  // maximum allowed overlap before container must expand (~60% visual)
-
-        // How wide is the hand's grid cell? Walk up to the grid item (.playerOpponent /
-        // .playerSelf) for a stable measurement; the .hand div itself has no fixed width.
-        const gridCell = hand.closest('.playerOpponent, .playerSelf');
-        const containerW = (gridCell ? gridCell.offsetWidth : hand.offsetWidth) || 600;
-        // Padding-left (10px) eats into usable width
-        const usableW = containerW - 10;
-
-        // Margin needed to fit all cards exactly in the container:
-        // usableW = VIS_W + (cardCount-1) * (VIS_W + margin*SCALE)
-        // → margin = ((usableW - VIS_W) / (cardCount-1) - VIS_W) / SCALE
-        const fitMargin = ((usableW - VIS_W) / (cardCount - 1) - VIS_W) / SCALE;
-
-        // Clamp: don't overlap more than necessary, but never less than MAX_MARGIN
-        const margin = Math.max(MAX_MARGIN, Math.min(MIN_MARGIN, fitMargin));
-
-        cards.forEach((card, i) => {
-            card.style.marginLeft = (i === 0 ? 0 : margin) + 'px';
-            hand.appendChild(card);
-        });
-
+        cards.forEach(card => hand.appendChild(card));
+        placeHand(hand, { maxAdvance: 46, minAdvance: 32, visible: cards.length });
+    } else if (hand.dataset.revealed) {
+        // Revealed at the end of a hand: show every card, wrapping so the faces stay readable
+        placeHand(hand, { maxAdvance: 46, minAdvance: 26, visible: cards.length });
     } else {
-        // ── Opponent hand ──
-        // Spacing is worked out for all opponents together (see refitOpponentHands);
-        // this is just the starting point until that runs.
-        layoutOpponentHand(hand, 1);
+        // Face-down opponent: a capped fan of card backs (the circle gives the real count)
+        placeHand(hand, { maxAdvance: 30, minAdvance: 10, visible: Math.min(cards.length, OPPONENT_VISIBLE_CAP) });
     }
 }
 
-// Opponent hands: how far apart the cards sit (px). Neighbouring cards always overlap a bit
-// (never more than `cap` apart). t runs from 0 (as tight as it ever gets) to 1 (as loose as
-// allowed). With fillCell, a hand may also spread out to use the width its cell already has.
-// Revealed hands get a wider range so the faces can be read.
-function layoutOpponentHand(hand, t, fillCell = false) {
-    const CSS_CARD_W = 107, VIS_W = CSS_CARD_W * 0.6, CARD_MARGIN_R = 3;
-    const cards = Array.from(hand.children);
-    const count = cards.length;
-
-    if (count <= 1) {
-        cards.forEach(card => { card.style.marginLeft = '0px'; card.style.marginRight = ''; });
-        return;
-    }
-
-    const revealed = !!hand.dataset.revealed;
-    const cap = revealed ? 46 : 34;
-    const tightest = revealed ? 12 : 8;
-    let advance = tightest + t * (cap - tightest);
-
-    if (fillCell) {
-        const cell = hand.closest('.playerOpponent');
-        const usableW = (cell ? cell.clientWidth : 0) - 20; // minus the hand's left and right padding
-        const fitAdvance = (usableW - VIS_W) / (count - 1);
-        advance = Math.max(advance, Math.min(cap, fitAdvance));
-    }
-
-    // Margins aren't scaled by the card's transform, so a card's layout step is
-    // CSS_CARD_W + its right margin + marginLeft. Solve for the margin that gives the advance.
-    const margin = advance - CSS_CARD_W - CARD_MARGIN_R;
-
-    // The last card's layout box is wider than what's drawn (it's scaled down), so pull its
-    // right margin in; otherwise the hand would claim ~45px more width than it uses.
-    const trailingMargin = VIS_W - CSS_CARD_W - CARD_MARGIN_R;
-
-    cards.forEach((card, i) => {
-        card.style.marginLeft = (i === 0 ? 0 : margin) + 'px';
-        card.style.marginRight = (i === count - 1) ? trailingMargin + 'px' : '';
-    });
+function layoutHand(player) {
+    const hand = document.getElementById('hand_' + player.PlayerID);
+    if (hand) layoutHandEl(hand);
 }
 
-// Space out every opponent's hand: as loose as possible, but keeping the table inside its
-// area (the grid's cells grow with their contents, so the widest hand sets the cell width).
-function refitOpponentHands() {
-    const grid = document.getElementById('players');
-    const hands = Array.from(document.querySelectorAll('.playerOpponent .hand'));
-    if (!grid || !hands.length) return;
-
-    // Cells can run past the grid's own width (some columns size to their contents), so the
-    // real limit is the right edge of the visible game area (leaving a small gutter)
-    const area = grid.closest('.game-content') || document.body;
-    const areaRight = () => area.getBoundingClientRect().left + area.clientWidth - 12;
-    const cells = Array.from(document.querySelectorAll('.playerOpponent'));
-    const widestRight = () => Math.max(...cells.map(c => c.getBoundingClientRect().right));
-
-    let t = 1;
-    for (let step = 20; step >= 0; step--) {
-        t = step / 20;
-        hands.forEach(h => layoutOpponentHand(h, t));
-        if (widestRight() <= areaRight()) break;
-    }
-
-    // Hands with fewer cards can spread across their cell's width without widening it
-    const before = widestRight();
-    hands.forEach(h => layoutOpponentHand(h, t, true));
-    if (widestRight() > before + 1) hands.forEach(h => layoutOpponentHand(h, t));
-
-    placeScoreboard();
+function layoutAllHands() {
+    document.querySelectorAll('.player .hand').forEach(layoutHandEl);
 }
 
 function repositionCards(player) {
     layoutHand(player);
-    scheduleOpponentRefit();
     updateCardCounts();
     schedulePlaceScoreboard();
 }
 
-// The "7 cards" text under each hand, taken from the cards actually shown
+// The number in each player's circle, taken from the cards actually in their hand
 function updateCardCounts() {
     document.querySelectorAll('.card-count').forEach(el => {
         const hand = document.getElementById('hand_' + el.id.replace('cards_', ''));
         const n = hand ? hand.children.length : 0;
-        el.textContent = n + (n === 1 ? ' card' : ' cards');
+        el.textContent = n;
+        el.title = n + (n === 1 ? ' card' : ' cards');
+        el.setAttribute('aria-label', el.title);
         el.classList.toggle('one', n === 1);
     });
 }
 
-// Cell widths are shared between players, so when any hand changes (or the window
-// resizes) every opponent hand is re-fitted. A few passes let the widths settle.
-let refitQueued = false;
-
-function opponentCellWidths() {
-    return Array.from(document.querySelectorAll('.playerOpponent'))
-        .map(cell => cell.offsetWidth).join(',');
-}
-
-function scheduleOpponentRefit() {
-    if (refitQueued) return;
-    refitQueued = true;
-    requestAnimationFrame(() => {
-        refitQueued = false;
-        refitOpponentHands();
-    });
-}
-
-window.addEventListener('resize', scheduleOpponentRefit);
+window.addEventListener('resize', layoutAllHands);
 window.addEventListener('resize', placeScoreboard);
+
+// Seats are fixed, but their width follows the window (and the side panel opening/closing)
+if (window.ResizeObserver) {
+    new ResizeObserver(layoutAllHands).observe(document.getElementById('players'));
+}
 
 // Highlight playable cards and dim unplayable ones based on the current game state
 function updatePlayableCards(topCard, currentColor) {
@@ -1526,7 +1438,7 @@ socket.on('discardCard', function(card, player) {
         // For opponents, removeOpponentCard handles DOM removal and repositionCards.
         // Snapshot for animation before it's removed.
         const hand = document.getElementById('hand_' + player.PlayerID);
-        const sourceEl = hand ? hand.lastElementChild : null;
+        const sourceEl = hand ? Array.from(hand.children).filter(c => c.style.display !== 'none').pop() : null;
         const srcRect = sourceEl ? sourceEl.getBoundingClientRect() : null;
 
         let discard = document.getElementById('discard');
@@ -1631,6 +1543,16 @@ function setColor(color) {
 
 // Build player panels around the table. The local player goes in the bottom slot;
 // opponents are placed in the surrounding grid positions relative to seat order.
+// Hide the seats of any row nobody is sitting in, so empty rows take no space.
+// (The middle rows share the piles, which keep their own minimum height.)
+function collapseUnusedSeats() {
+    [[0, 1, 2], [3, 4], [5, 6]].forEach(ids => {
+        const seats = ids.map(i => document.getElementById('player' + i));
+        const used = seats.some(el => el.querySelector('.player'));
+        seats.forEach(el => el.classList.toggle('seat-collapsed', !used));
+    });
+}
+
 function createPlayersUI(players) {
     for (let i = 0; i < 7;  i++) {
         document.getElementById('player' + i).innerHTML = '';
@@ -1667,15 +1589,16 @@ function createPlayersUI(players) {
         div_player.appendChild(div_player_name);
         div_player.appendChild(div_hand);
 
-        // Footer row: points, how many cards are in the hand, hands won
+        // Footer row: points and hands won
         const div_footer = document.createElement('div');
         div_footer.className = 'player-footer';
         const div_cards = document.createElement('div');
         div_cards.className = 'card-count';
         div_cards.id = 'cards_' + players[i].PlayerID;
-        div_cards.textContent = '0 cards';
-        div_footer.append(div_points, div_cards, div_hands_won);
+        div_cards.textContent = '0';
+        div_footer.append(div_points, div_hands_won);
         div_player.appendChild(div_footer);
+        div_player.appendChild(div_cards);   // the count sits in a circle at the right of the hand
         if(players[i].SocketID == socketId) {
             document.getElementById('playerSelf').appendChild(div_player);
         } else {
@@ -1692,6 +1615,8 @@ function createPlayersUI(players) {
             document.getElementById('player' + player_location).appendChild(div_player);
         }
     }
+
+    collapseUnusedSeats();
 }
 
 function unoCall(type) {
