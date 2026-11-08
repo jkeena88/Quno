@@ -47,13 +47,33 @@
     .chip { display: inline-block; min-width: 30px; padding: 2px 6px; text-align: center; border-radius: 6px;
             font-weight: 700; border: 1px solid rgba(255,255,255,.25); }
     .chip.removable { cursor: pointer; }
+    .chip.back { background: #2a2d33; color: #6b6e75; border-color: #3a3d44; }
     .chip.removable:hover { outline: 2px solid var(--bad); }
     .opts { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 6px 14px; margin-bottom: 10px; }
     .opts label { display: flex; align-items: center; gap: 8px; cursor: pointer; }
     #eventLog { max-height: 260px; overflow-y: auto; font: 12px/1.5 ui-monospace, Consolas, monospace; }
-    #eventLog div { padding: 2px 0; border-bottom: 1px solid var(--line); }
-    #eventLog .time { color: var(--muted); margin-right: 8px; }
-    #eventLog .admin { color: #93c5fd; }
+    #eventLog .ev { display: flex; gap: 8px; padding: 3px 8px; background: var(--cat); border-bottom: 1px solid var(--bg); }
+    #eventLog .ev.play { --cat: #085041; } #eventLog .ev.draw { --cat: #633806; }
+    #eventLog .ev.quno { --cat: #3C3489; } #eventLog .ev.room { --cat: #2f3136; }
+    #eventLog .ev.admin .tx { color: #93c5fd; }
+    #eventLog .time { color: var(--muted); flex: none; }
+    #eventLog .a-pill { padding: 0 7px; border-radius: 999px; border: 2px solid var(--pill); background: var(--panel); font-weight: 700; }
+    #eventLog .ev-div { display: flex; align-items: center; gap: 8px; padding: 6px 8px; font-size: 11px; color: var(--muted); }
+    #eventLog .ev-div::before, #eventLog .ev-div::after { content: ''; flex: 1; border-top: 1px solid var(--line); }
+    #eventLog .ev-div.match { color: var(--text); font-weight: 700; padding: 9px 8px; }
+    #eventLog .ev-div.match::before, #eventLog .ev-div.match::after { border-top: 2px solid #555; }
+    #eventLog .filtered { display: none !important; }
+    .ms { position: relative; width: 210px; }
+    .ms-btn { width: 100%; display: flex; justify-content: space-between; align-items: center; gap: 8px; white-space: nowrap; }
+    .ms-btn > span:first-child { overflow: hidden; text-overflow: ellipsis; }
+    .ms-menu { position: absolute; top: calc(100% + 4px); left: 0; width: max-content; min-width: 100%; max-width: 320px;
+               max-height: 260px; overflow-y: auto; z-index: 50; background: var(--panel); border: 1px solid var(--line);
+               border-radius: 8px; padding: 4px; box-shadow: 0 8px 24px rgba(0,0,0,.5); }
+    .ms-item { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 4px; cursor: pointer; }
+    .ms-item:hover { background: #1e2128; }
+    .ms-item span:last-child { overflow: hidden; text-overflow: ellipsis; }
+    .ms-all { font-weight: 600; border-bottom: 1px solid var(--line); border-radius: 4px 4px 0 0; margin-bottom: 2px; }
+    .ms-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dot); flex: none; }
     #toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); padding: 8px 16px;
              border-radius: 8px; opacity: 0; transition: opacity .2s; pointer-events: none; }
     #toast.show { opacity: 1; }
@@ -129,7 +149,11 @@
         </section>
 
         <section class="panel">
-            <h2>Players in this hand <span class="muted">(click a card to remove it)</span></h2>
+            <h2>Players in this hand <span class="muted" id="handsHint"></span></h2>
+            <div class="bar">
+                <button id="cardsToggle">Show all cards</button>
+                <span class="muted" id="cardsNote">Cards are hidden so you can play fairly. Showing them is announced in the game log.</span>
+            </div>
             <div id="players"></div>
         </section>
 
@@ -140,6 +164,10 @@
 
         <section class="panel">
             <h2>Event log</h2>
+            <div class="bar" id="logFilters">
+                <div class="ms" id="filterTypes"></div>
+                <div class="ms" id="filterPlayers"></div>
+            </div>
             <div id="eventLog"></div>
         </section>
     </main>
@@ -201,10 +229,14 @@ function signIn(password) {
     socket.on('state', render);
         socket.on('eventLog', entries => {
         $('eventLog').innerHTML = entries.slice().reverse().map(logRow).join('');
+        addLogPlayers(entries.flatMap(e => e.affects || []));
+        applyLogFilters();
     });
     socket.on('logEvent', entry => {
         const box = $('eventLog');
+        addLogPlayers(entry.affects || []);
         box.insertAdjacentHTML('afterbegin', logRow(entry));
+        if (!rowVisible(box.firstElementChild)) box.firstElementChild.classList.add('filtered');
         while (box.children.length > MAX_LOG_ROWS) box.lastChild.remove();
     });
 }
@@ -235,6 +267,12 @@ $('refreshBtn').onclick = () => needSelected() && act('refresh', { name: selecte
 $('bootBtn').onclick    = () => needSelected() && act('boot', { name: selected }, `Boot ${selected}?`);
 $('drawBtn').onclick    = () => needSelected() && act('draw', { name: selected, count: $('drawCount').value });
 $('giveBtn').onclick    = () => needSelected() && act('giveCard', { name: selected, cardId: $('cardSel').value });
+
+$('cardsToggle').onclick = () => {
+    const show = !(lastState && lastState.cardsVisible);
+    act('setCardsVisible', { visible: show },
+        show ? "Show everyone's cards? The players will see a message in the game log." : null);
+};
 
 $('copyState').onclick = () => {
     navigator.clipboard.writeText(JSON.stringify(lastState, null, 2))
@@ -299,6 +337,12 @@ function render(state) {
     if (sig === lastSig) return;
     lastSig = sig;
     syncOptions(state.options);
+    $('cardsToggle').textContent = state.cardsVisible ? 'Hide all cards' : 'Show all cards';
+    $('handsHint').textContent = state.cardsVisible ? '(click a card to remove it)' : '';
+    $('cardsNote').textContent = state.cardsVisible
+        ? 'Everyone can see in the game log that the admin is viewing cards.'
+        : 'Cards are hidden so you can play fairly. Showing them is announced in the game log.';
+    addLogPlayers([...state.players.map(p => p.name), ...state.waiting.map(w => w.name)]);
     renderGame(state);
     renderPlayers(state);
 }
@@ -336,9 +380,9 @@ function renderPlayers(s) {
                 ${p.connected ? '' : '<span class="tag off">offline</span>'}
                 ${p.calledUno ? '<span class="tag">Quno called</span>' : ''}
                 ${p.waitingForColor ? '<span class="tag">choosing color</span>' : ''}
-                <span class="muted">seat ${p.seat} · ${p.points} pts · ${p.handsWon} hands won · ${p.hand.length} cards</span>
+                <span class="muted">seat ${p.seat} · ${p.points} pts · ${p.handsWon} hands won · ${p.handCount} cards</span>
             </div>
-            <div class="hand">${p.hand.slice().sort(byColorThenType).map(c => chip(c, true)).join('') || '<span class="muted">empty hand</span>'}</div>
+            <div class="hand">${(p.hand ? p.hand.slice().sort(byColorThenType).map(c => chip(c, true)) : Array(p.handCount).fill('<span class="chip back" title="Hidden">?</span>')).join('') || '<span class="muted">empty hand</span>'}</div>
         </div>`).join('')
         : '<p class="muted">No match in progress.</p>';
 
@@ -356,6 +400,7 @@ const OPTION_LABELS = {
     stackDraw2: 'Stack Draw 2s', skipDraw2: 'Skip Draw 2s', reverseDraw2: 'Reverse Draw 2s',
     skipSkip: 'Skip a Skip',
     stackDraw4: 'Stack Draw 4s', skipDraw4: 'Skip Draw 4s', reverseDraw4: 'Reverse Draw 4s',
+    drawUntilPlay: 'Keep drawing until you can play',
 };
 
 $('opts').innerHTML = Object.entries(OPTION_LABELS).map(([key, label]) =>
@@ -385,10 +430,176 @@ $('scoreAddBtn').onclick = () => needSelected() && act('adjustScore', scorePaylo
 
 const MAX_LOG_ROWS = 300;
 
+const LOG_TYPES = ['play', 'draw', 'quno', 'room'];
+const PILL = { red: '#e8342a', yellow: '#FFAA01', green: '#3a9e3a', blue: '#4545ff', black: '#8a8780' };
+
+function cardLabel(color, type) {
+    const t = { draw2: 'draw 2', draw4: 'draw 4' }[type] ?? type;
+    return color === 'black' ? String(t) : color + ' ' + t;
+}
+const partText = p => typeof p === 'string' ? p : (p.card ? cardLabel(p.card.color, p.card.type) : String(p.color));
+function partHtml(p) {
+    if (typeof p === 'string') return esc(p);
+    const color = p.card ? p.card.color : p.color;
+    return PILL[color] ? `<span class="a-pill" style="--pill:${PILL[color]}">${esc(partText(p))}</span>` : esc(partText(p));
+}
+
 function logRow(entry) {
-    const time = new Date(entry.t).toLocaleTimeString([], { hour12: false });
-    const cls = entry.msg.startsWith('[admin]') ? ' class="admin"' : '';
-    return `<div${cls}><span class="time">${time}</span>${esc(entry.msg)}</div>`;
+    const d = new Date(entry.t);
+    const time = d.toLocaleTimeString([], { hour12: false });
+    const tip = esc(d.toLocaleString());
+    if (entry.type === 'divider') {
+        return `<div class="ev-div ${entry.level === 'match' ? 'match' : 'hand'}" title="${tip}">${esc(entry.parts.join(''))}</div>`;
+    }
+    const cat = LOG_TYPES.includes(entry.type) ? entry.type : 'room';
+    const isAdmin = entry.parts.map(partText).join('').startsWith('[admin]');
+    return `<div class="ev ${cat}${isAdmin ? ' admin' : ''}" data-cat="${cat}" data-affects="${esc(JSON.stringify(entry.affects || []))}" title="${tip}"><span class="time">${time}</span><span class="tx">${entry.parts.map(partHtml).join('')}</span></div>`;
+}
+
+// ── Log filters ──
+// A dropdown of checkboxes with a "Select all" row. Anything not unchecked counts as selected,
+// so new items (such as a player who joins later) start out selected.
+function createMultiSelect(root, label, onChange) {
+    const deselected = new Set();
+    let items = [];   // [{ value, text, dot? }]
+    let allCb = null;
+    let itemCbs = [];
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'ms-btn';
+    btn.setAttribute('aria-haspopup', 'true');
+    btn.setAttribute('aria-expanded', 'false');
+    const btnText = document.createElement('span');
+    const caret = document.createElement('span');
+    caret.textContent = '▾';
+    btn.append(btnText, caret);
+
+    const menu = document.createElement('div');
+    menu.className = 'ms-menu';
+    menu.hidden = true;
+    root.append(btn, menu);
+
+    const selectedCount = () => items.filter(i => !deselected.has(i.value)).length;
+
+    function sync() {
+        const n = selectedCount();
+        btnText.textContent = label + ': ' + (n === items.length ? 'All' : n === 0 ? 'None' : n + ' of ' + items.length);
+        if (allCb) {
+            allCb.checked = n === items.length;
+            allCb.indeterminate = n > 0 && n < items.length;
+        }
+    }
+
+    function makeRow(text, cls, dot) {
+        const row = document.createElement('label');
+        row.className = 'ms-item ' + cls;
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        row.appendChild(cb);
+        if (dot) {
+            const d = document.createElement('span');
+            d.className = 'ms-dot';
+            d.style.setProperty('--dot', dot);
+            row.appendChild(d);
+        }
+        const t = document.createElement('span');
+        t.textContent = text;   // names go in via textContent, so they are never parsed as HTML
+        row.appendChild(t);
+        menu.appendChild(row);
+        return cb;
+    }
+
+    function render() {
+        menu.textContent = '';
+
+        allCb = makeRow('Select all', 'ms-all');
+        allCb.addEventListener('change', () => {
+            // Everything selected → clear it all; otherwise select everything
+            const selectAll = selectedCount() !== items.length;
+            deselected.clear();
+            if (!selectAll) items.forEach(i => deselected.add(i.value));
+            itemCbs.forEach(cb => { cb.checked = selectAll; });
+            sync();
+            onChange();
+        });
+
+        itemCbs = items.map(item => {
+            const cb = makeRow(item.text, '', item.dot);
+            cb.checked = !deselected.has(item.value);
+            cb.addEventListener('change', () => {
+                if (cb.checked) deselected.delete(item.value); else deselected.add(item.value);
+                sync();
+                onChange();
+            });
+            return cb;
+        });
+        sync();
+    }
+
+    function setOpen(open) {
+        menu.hidden = !open;
+        btn.setAttribute('aria-expanded', String(open));
+    }
+
+    btn.addEventListener('click', () => setOpen(menu.hidden));
+    document.addEventListener('click', e => { if (!root.contains(e.target)) setOpen(false); });
+    root.addEventListener('keydown', e => {
+        if (e.key === 'Escape' && !menu.hidden) { setOpen(false); btn.focus(); }
+    });
+
+    render();
+
+    return {
+        setItems(newItems) { items = newItems; render(); },
+        isSelected: value => !deselected.has(value),
+        allSelected: () => selectedCount() === items.length,
+    };
+}
+
+// A row shows if its type is selected and, unless everything in the Players list is selected,
+// it concerns a selected player (or concerns no one in particular and "No specific player"
+// is selected). Dividers between hands are always shown.
+function rowVisible(el) {
+    if (el.classList.contains('ev-div')) return true;
+    if (!typeFilter.isSelected(el.dataset.cat)) return false;
+    if (playerFilter.allSelected()) return true;
+    const affects = JSON.parse(el.dataset.affects || '[]');
+    if (affects.length === 0) return playerFilter.isSelected(NO_PLAYER);
+    return affects.some(name => playerFilter.isSelected(name));
+}
+
+function applyLogFilters() {
+    Array.from($('eventLog').children).forEach(el => el.classList.toggle('filtered', !rowVisible(el)));
+}
+
+const typeFilter = createMultiSelect($('filterTypes'), 'Types', applyLogFilters);
+typeFilter.setItems(LOG_TYPES.map(t => ({
+    value: t,
+    text: t === 'room' ? 'Table & room' : t[0].toUpperCase() + t.slice(1),
+    dot: { play: '#1D9E75', draw: '#BA7517', quno: '#7F77DD', room: '#888780' }[t],
+})));
+
+// The player list grows as names show up in the game state or the log; "No specific player"
+// covers entries that aren't about anyone (a Symbol, so it can't clash with a name)
+const NO_PLAYER = Symbol('no specific player');
+const playerFilter = createMultiSelect($('filterPlayers'), 'Players', applyLogFilters);
+const logPlayers = [];
+function refreshPlayerItems() {
+    playerFilter.setItems([
+        { value: NO_PLAYER, text: 'No specific player' },
+        ...logPlayers.map(name => ({ value: name, text: name })),
+    ]);
+}
+refreshPlayerItems();
+function addLogPlayers(names) {
+    let added = false;
+    names.forEach(name => {
+        if (name && !logPlayers.includes(name)) { logPlayers.push(name); added = true; }
+    });
+    if (!added) return;
+    logPlayers.sort((a, b) => a.localeCompare(b));
+    refreshPlayerItems();
 }
 
 // ── Start: reuse the password for this browser tab so a reload doesn't ask again ──

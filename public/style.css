@@ -92,10 +92,6 @@
     outline-color: var(--player-active-outline);
 }
 
-[data-theme="dark"] .message:nth-child(odd) {
-    background-color: rgba(255,255,255,0.025);
-}
-
 [data-theme="dark"] #message-container {
     background-color: var(--bg-surface);
 }
@@ -104,9 +100,9 @@
     background: transparent;
 }
 
-/* ── Dark mode toggle button ── */
+/* ── Header controls: name, sound, theme ── */
 
-.theme-toggle {
+.header-controls {
     position: absolute;
     right: 16px;
     top: 50%;
@@ -114,16 +110,25 @@
     display: flex;
     align-items: center;
     gap: 8px;
+}
+
+.header-item { position: relative; }
+
+.header-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    height: 32px;
+    padding: 0 11px;
     background: rgba(255,255,255,0.10);
     border: 1px solid rgba(255,255,255,0.18);
     border-radius: 999px;
-    padding: 5px 14px 5px 10px;
-    cursor: pointer;
-    color: rgba(255,255,255,0.75);
+    color: rgba(255,255,255,0.85);
     font-family: 'DM Sans', sans-serif;
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 500;
-    letter-spacing: 0.02em;
+    cursor: pointer;
     transition: background 0.2s, border-color 0.2s, color 0.2s;
     white-space: nowrap;
     -webkit-tap-highlight-color: transparent;
@@ -131,46 +136,77 @@
     user-select: none;
 }
 
-.theme-toggle:hover {
-    background: rgba(255,255,255,0.16);
+.header-btn:hover,
+.header-btn[aria-expanded="true"] {
+    background: rgba(255,255,255,0.20);
+    border-color: rgba(255,255,255,0.32);
     color: #fff;
-    border-color: rgba(255,255,255,0.28);
 }
 
-.theme-toggle-track {
-    width: 28px;
-    height: 16px;
-    border-radius: 999px;
-    background: rgba(255,255,255,0.2);
-    position: relative;
-    transition: background 0.25s;
-    flex-shrink: 0;
-}
+.header-btn:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.icon-btn { width: 32px; padding: 0; }
+.name-btn #header-name { max-width: 140px; overflow: hidden; text-overflow: ellipsis; }
 
-.theme-toggle-thumb {
-    width: 12px;
-    height: 12px;
-    border-radius: 50%;
-    background: #fff;
+/* The theme button shows the mode a click switches to: moon in light mode, sun in dark mode */
+.icon-sun { display: none; }
+[data-theme="dark"] .icon-moon { display: none; }
+[data-theme="dark"] .icon-sun { display: block; }
+
+/* The sound icon swaps its waves for a slash when muted or at zero volume */
+.sound-slash { display: none; }
+#soundToggle.is-muted .sound-waves { display: none; }
+#soundToggle.is-muted .sound-slash { display: block; }
+
+.popover {
     position: absolute;
-    top: 2px;
-    left: 2px;
-    transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
-    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
-}
-
-[data-theme="dark"] .theme-toggle-track {
-    background: rgba(100, 140, 255, 0.5);
-}
-
-[data-theme="dark"] .theme-toggle-thumb {
-    transform: translateX(12px);
-}
-
-.theme-toggle-icon {
+    top: calc(100% + 10px);
+    right: 0;
+    width: 280px;
+    padding: 14px;
+    background: var(--bg-surface);
+    color: var(--text-primary);
+    border: 1px solid var(--border-medium);
+    border-radius: 12px;
+    box-shadow: var(--shadow-modal);
+    font-family: 'DM Sans', sans-serif;
     font-size: 13px;
-    line-height: 1;
+    font-weight: 400;
+    z-index: 2000;
 }
+
+.popover[hidden] { display: none; }
+
+.popover-label {
+    margin-bottom: 8px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--text-secondary);
+}
+
+.popover-gap { margin-top: 14px; }
+.popover-help { font-size: 12px; color: var(--text-secondary); }
+
+.popover input[type="text"],
+.popover select {
+    font: inherit;
+    padding: 6px 10px;
+    background: var(--bg-surface);
+    color: var(--text-primary);
+    border: 1px solid var(--border-medium);
+    border-radius: var(--radius-sm);
+}
+
+.name-row { display: flex; align-items: center; gap: 6px; }
+.name-row input[type="text"] { flex: 1; min-width: 0; }
+.name-row .btn { margin: 0; padding: 6px 14px; font-size: 13px; }
+.name-msg { min-height: 1.2em; margin: 4px 0; font-size: 12px; color: #c94f5f; }
+
+.volume-row label { font-weight: 500; }
+
+.popover select { width: 100%; }
+.popover input[type="text"]:focus { outline: none; border-color: var(--btn-active-bg); }
 
 /* ── Reset & Base ── */
 
@@ -210,12 +246,15 @@ main {
     margin: 0 auto;
     padding: 24px 20px;
     flex: 1;
+    position: relative;
 }
 
 /* ── Header ── */
 
 header {
-    position: relative;
+    position: sticky;          /* stays put if the game area is scrolled sideways */
+    left: 0;
+    z-index: 5;               /* keeps the header's popovers above the game area */
     width: 100%;
 }
 
@@ -229,7 +268,6 @@ header h1 {
     font-weight: 500;
     letter-spacing: 0.12em;
     text-transform: uppercase;
-    min-width: 100vw;
 }
 
 /* ── Buttons ── */
@@ -316,13 +354,27 @@ main #status {
 /* ── Player grid ── */
 
 .players {
-    width: 76%;
-    margin: 18px 0 0;
+    width: 100%;
+    max-width: 960px;
+    margin: 18px auto 0;
     display: grid;
-    grid-template-columns: max-content max-content minmax(88px, auto) minmax(88px, auto) 56px minmax(88px, auto) minmax(88px, auto) max-content max-content;
-    gap: 6px;
+    /* Three columns (the middle one is wider, with room for both piles and the arrow) and rows that
+       size to their seats: seats are a fixed minimum height, and a row with no players takes no space */
+    grid-template-columns: minmax(232px, 1fr) minmax(284px, 1fr) minmax(232px, 1fr);
+    grid-template-rows: auto auto auto auto;
+    column-gap: 6px;
+    row-gap: 0;
     padding: 10px;
 }
+
+.playerOpponent {
+    min-height: 172px;
+    align-self: start;
+    margin: 3px 0;
+}
+
+/* Rows with nobody in them (main.js adds this) disappear entirely */
+.playerOpponent.seat-collapsed { display: none; }
 
 .grid-item {
     background-color: var(--grid-item-bg);
@@ -331,17 +383,19 @@ main #status {
 }
 
 /* Grid positions — 9-column grid; col 5 is a narrow dedicated lane for the direction indicator */
-#player0 { grid-column: 2 / span 2; grid-row: 1; }
-#player1 { grid-column: 4 / span 3; grid-row: 1; }
-#player2 { grid-column: 7 / span 2; grid-row: 1; }
-#player3 { grid-column: 1 / span 2; grid-row: 2; }
+#player0 { grid-column: 1; grid-row: 1; }
+#player1 { grid-column: 2; grid-row: 1; }
+#player2 { grid-column: 3; grid-row: 1; }
+#player3 { grid-column: 1; grid-row: 2; }
 
 .playArea1 {
-    grid-column: 3 / span 2;
+    grid-column: 2;
+    justify-self: start;
+    margin-left: 16px;     /* room between the draw pile and the hands to its left */
     grid-row: 2 / span 2;
     position: relative;
     min-width: var(--pile-card-width);
-    min-height: var(--pile-card-height);
+    min-height: calc(var(--pile-card-height) + 28px);
     background: transparent;
     border: none;
 }
@@ -361,11 +415,13 @@ main #status {
 }
 
 .playArea2 {
-    grid-column: 6 / span 2;
+    grid-column: 2;
+    justify-self: end;
+    margin-right: 16px;    /* room between the discard pile and the hands to its right */
     grid-row: 2 / span 2;
     position: relative;
     min-width: var(--pile-card-width);
-    min-height: var(--pile-card-height);
+    min-height: calc(var(--pile-card-height) + 28px);
     background: transparent;
     border: none;
     overflow: visible;
@@ -373,7 +429,8 @@ main #status {
 
 /* ── Stacked-pile look ── */
 
-/* Draw pile: alternating light/dark 1px layers read as the edges of a thick deck */
+/* Draw pile: alternating light/dark 1px layers read as the edges of a thick deck. main.js sets
+   the exact layers from the real card count (this is the fallback before it runs). */
 .playArea1 .pile {
     box-shadow:
         1px 1px 0 var(--stack-edge-a),
@@ -386,12 +443,16 @@ main #status {
         8px 9px 8px rgba(0, 0, 0, 0.3);
 }
 
-/* Discard pile: two slightly rotated cards peek out from under the top card.
-   They only appear once a discard card exists (the top card carries dataCardColor). */
-.playArea2::before,
-.playArea2::after {
-    content: '';
-    display: none;
+/* Empty deck: card back disappears, leaving a dashed outline */
+.playArea1 .pile[data-count="0"] {
+    background-image: none;
+    box-shadow: none;
+    border: 2px dashed var(--border-medium);
+}
+
+/* Discard pile: loosely scattered cards peek out from under the top card (added by main.js,
+   one per card in the pile, up to a few) */
+.discard-under {
     position: absolute;
     top: 50%;
     left: 50%;
@@ -402,55 +463,7 @@ main #status {
     border: 1px solid var(--stack-edge-a);
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
     pointer-events: none;
-}
-
-.playArea2::before {
-    transform: translate(-50%, -50%) rotate(-5deg);
-    z-index: 0;
-}
-
-.playArea2::after {
-    transform: translate(-50%, -50%) rotate(3deg);
     z-index: 1;
-}
-
-/* Draw pile: fewer layers as the deck runs down (4+ = the default above) */
-.playArea1 .pile[data-count="3"] {
-    box-shadow:
-        1px 1px 0 var(--stack-edge-a),
-        2px 2px 0 var(--stack-edge-b),
-        3px 3px 0 var(--stack-edge-a),
-        4px 4px 0 var(--stack-edge-b),
-        5px 5px 0 var(--stack-edge-a),
-        6px 7px 7px rgba(0, 0, 0, 0.3);
-}
-
-.playArea1 .pile[data-count="2"] {
-    box-shadow:
-        1px 1px 0 var(--stack-edge-a),
-        2px 2px 0 var(--stack-edge-b),
-        3px 3px 0 var(--stack-edge-a),
-        4px 5px 6px rgba(0, 0, 0, 0.3);
-}
-
-.playArea1 .pile[data-count="1"] {
-    box-shadow:
-        1px 1px 0 var(--stack-edge-a),
-        2px 3px 4px rgba(0, 0, 0, 0.3);
-}
-
-/* Empty deck: card back disappears, leaving a dashed outline */
-.playArea1 .pile[data-count="0"] {
-    background-image: none;
-    box-shadow: none;
-    border: 2px dashed var(--border-medium);
-}
-
-/* Discard pile: first card lies flat; background cards appear as discards accumulate */
-.playArea2[data-count="2"]::before,
-.playArea2[data-count="3"]::before,
-.playArea2[data-count="3"]::after {
-    display: block;
 }
 
 /* Soft shadow under the top discard so it sits above the cards beneath */
@@ -458,14 +471,14 @@ main #status {
     box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
 }
 
-#player4 { grid-column: 8 / span 2; grid-row: 2; }
-#player5 { grid-column: 1 / span 2; grid-row: 3; }
-#player6 { grid-column: 8 / span 2; grid-row: 3; }
+#player4 { grid-column: 3; grid-row: 2; }
+#player5 { grid-column: 1; grid-row: 3; }
+#player6 { grid-column: 3; grid-row: 3; }
 
 /* ── Direction / draw indicator ── */
 
 .direction-indicator {
-    grid-column: 5;            /* dedicated center column between the two piles */
+    grid-column: 2;            /* centered between the two piles */
     grid-row: 2 / span 2;     /* same rows as the piles */
     align-self: center;
     justify-self: center;
@@ -519,7 +532,8 @@ main #status {
 #direction-count.pulse { animation: pulse-count 0.35s cubic-bezier(0.34, 1.56, 0.64, 1); }
 
 .playerSelf {
-    grid-column: 2 / span 7;
+    margin-top: 6px;
+    grid-column: 1 / -1;
     grid-row: 4;
     background: var(--bg-surface);
     border: 1px solid var(--border-subtle);
@@ -559,6 +573,34 @@ main #status {
 
 .points { text-align: left; float: left; }
 .hands-won { text-align: right; float: right; }
+
+/* Points, card count and hands won share one row under each hand */
+.player-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+}
+.player-footer .points, .player-footer .hands-won { float: none; margin: 0; }
+/* How many cards are in the hand: a circle at the right of the hand */
+.card-count {
+    position: absolute;
+    right: 10px;
+    top: 63px;
+    width: 34px;
+    height: 34px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: var(--text-primary);
+    color: var(--bg-surface);
+    font-size: 14px;
+    font-weight: 700;
+}
+.card-count.one { background: #8a5a12; color: #fff; }   /* one card left: Quno time */
+[data-theme="dark"] .card-count.one { background: #e0a94a; color: #1a1a1a; }
 
 .name {
     text-align: left;
@@ -600,8 +642,6 @@ main .card.unplayable {
 
 main .card:first-child { margin-left: 0; }
 
-/* Opponent starting overlap — JS repositionCards overrides this dynamically */
-.playerOpponent .card { margin-left: -70px; }
 
 /* Hovering a card in your own hand lifts it. The invisible ::after extends the
    card's hit area downward to cover the gap the lift leaves, so the pointer
@@ -621,15 +661,18 @@ main .card:first-child { margin-left: 0; }
 }
 
 main .player .hand {
-    display: flex;
-    justify-content: flex-start;
-    align-items: flex-start;
     position: relative;
-    height: calc(var(--card-height) * 0.6);
-    padding-left: 10px;
-    padding-bottom: 8px;
+    height: calc(var(--card-height) * 0.6 + 8px);   /* main.js sets the real height as rows are added */
     clear: left;
     overflow: visible;
+}
+
+/* main.js sets each card's left and top */
+main .player .hand .card {
+    position: absolute;
+    margin: 0;
+    top: 0;
+    left: 0;
 }
 
 /* The discard card is pinned to the center of its play-area cell and shown at
@@ -857,12 +900,23 @@ hr {
     line-height: 1.5;
 }
 
-.message:nth-child(odd) { background-color: var(--bg-panel); }
+/* Let the log fill the remaining side-panel height and scroll inside it */
+.log-panel {
+    flex: 1;
+    min-height: 0;          /* allows the flex child to shrink below its content height */
+    display: flex;
+    flex-direction: column;
+}
+
+.log-panel h3 {
+    flex-shrink: 0;
+}
 
 #message-container {
     border-left: 1px solid var(--border-subtle);
     overflow-y: auto;
     flex: 1;
+    min-height: 0;
     background-color: var(--bg-surface);
 }
 
@@ -888,6 +942,9 @@ hr {
 }
 
 #waitingOverlay {
+    right: 260px;               /* stop at the log side panel so the text centers over the game area */
+    padding: 0 24px;
+    transition: right 0.25s ease;
     background: rgba(26, 26, 26, 0.72);
     -webkit-backdrop-filter: blur(4px);
     backdrop-filter: blur(4px);
@@ -897,6 +954,10 @@ hr {
     text-align: center;
     pointer-events: none;
     letter-spacing: 0.01em;
+}
+
+body:has(#side-panel.collapsed) #waitingOverlay {
+    right: 34px;
 }
 
 #handSummaryModal {
@@ -947,13 +1008,41 @@ hr {
     width: 920px;
     max-width: 95vw;
     max-height: 88vh;
-    overflow-y: auto;
+    overflow: hidden;
+    position: relative;
     text-align: left;
     display: flex;
     flex-direction: column;
     border-radius: var(--radius-lg);
     padding: 32px 28px 24px;
 }
+
+/* The stats scroll inside the window, so the X and Close button stay put */
+#handSummaryContent {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+}
+
+.modal-close {
+    position: absolute;
+    top: 10px;
+    right: 12px;
+    width: 32px;
+    height: 32px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    background: transparent;
+    border: 0;
+    border-radius: 50%;
+    color: var(--text-secondary);
+    cursor: pointer;
+    z-index: 1;
+}
+.modal-close:hover { background: var(--bg-panel); color: var(--text-primary); }
+.modal-close:focus-visible { outline: 2px solid var(--btn-active-bg); }
 
 #handSummaryModal h2 {
     text-align: center;
@@ -1012,15 +1101,15 @@ hr {
 /* ── Scrollbar polish ── */
 
 #message-container::-webkit-scrollbar,
-#handSummaryModal .modal-content::-webkit-scrollbar {
+#handSummaryContent::-webkit-scrollbar {
     width: 5px;
 }
 #message-container::-webkit-scrollbar-track,
-#handSummaryModal .modal-content::-webkit-scrollbar-track {
+#handSummaryContent::-webkit-scrollbar-track {
     background: transparent;
 }
 #message-container::-webkit-scrollbar-thumb,
-#handSummaryModal .modal-content::-webkit-scrollbar-thumb {
+#handSummaryContent::-webkit-scrollbar-thumb {
     background: var(--border-medium);
     border-radius: 3px;
 }
@@ -1033,8 +1122,29 @@ hr {
     margin-top: 8px;
 }
 
-.config-container {
-    padding-bottom: 10px;
+.volume-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.volume-row input[type="range"] {
+    flex: 1;
+    min-width: 0;
+}
+
+.volume-row span {
+    width: 3.2em;
+    text-align: right;
+}
+
+.mute-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 6px;
+    cursor: pointer;
 }
 
 /* Read-only options (non-host) */
@@ -1056,4 +1166,311 @@ hr {
 
 #options.readonly #left-options input[type="checkbox"] {
     cursor: not-allowed;
+}
+
+/* ── Log: category tints, pills, dividers, filters ── */
+:root {
+    --log-play-bg: #E1F5EE; --log-play-edge: #1D9E75;
+    --log-draw-bg: #FAEEDA; --log-draw-edge: #BA7517;
+    --log-quno-bg: #EEEDFE; --log-quno-edge: #7F77DD;
+    --log-room-bg: #F1EFE8; --log-room-edge: #888780;
+}
+[data-theme="dark"] {
+    --log-play-bg: #085041;
+    --log-draw-bg: #633806;
+    --log-quno-bg: #3C3489;
+    --log-room-bg: #444441;
+}
+
+.log-play { --log-bg: var(--log-play-bg); --log-edge: var(--log-play-edge); }
+.log-draw { --log-bg: var(--log-draw-bg); --log-edge: var(--log-draw-edge); }
+.log-quno { --log-bg: var(--log-quno-bg); --log-edge: var(--log-quno-edge); }
+.log-room { --log-bg: var(--log-room-bg); --log-edge: var(--log-room-edge); }
+
+.message[data-cat] {
+    background: var(--log-bg);
+    color: var(--text-primary);
+    border-bottom: 1px solid var(--bg-surface);
+}
+
+.log-entry { display: flex; align-items: flex-start; gap: 8px; }
+.log-icon  { flex: none; width: 1.3em; text-align: center; }
+.log-text  { flex: 1; min-width: 0; }
+
+.message.affects-you {
+    font-weight: 500;
+    outline: 1.5px solid var(--log-edge);
+    outline-offset: -1.5px;
+}
+
+.log-you-tag {
+    flex: none;
+    font-size: 11px;
+    font-weight: 500;
+    padding: 0 7px;
+    border-radius: 999px;
+    background: rgba(59, 130, 246, 0.18);
+    color: var(--btn-active-bg);
+}
+
+/* Card and color pills: neutral fill, colored outline, so contrast never depends on the row tint */
+.log-pill {
+    display: inline-block;
+    padding: 0 8px;
+    margin: 0 1px;
+    border-radius: 999px;
+    border: 2px solid var(--pill);
+    background: var(--bg-surface);
+    color: var(--text-primary);
+    font-weight: 600;
+    font-size: 12px;
+    line-height: 1.5;
+}
+.log-pill-red    { --pill: #e8342a; }
+.log-pill-yellow { --pill: #FFAA01; }
+.log-pill-green  { --pill: #3a9e3a; }
+.log-pill-blue   { --pill: #4545ff; }
+.log-pill-black  { --pill: #2C2C2A; }
+[data-theme="dark"] .log-pill-black { --pill: #8a8780; }
+
+/* Dividers between hands (light) and matches (heavy) */
+.log-divider {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 12px;
+    font-size: 11px;
+    color: var(--text-secondary);
+}
+.log-divider::before, .log-divider::after {
+    content: '';
+    flex: 1;
+    border-top: 1px solid var(--border-medium);
+}
+.log-divider-match { padding: 12px; font-weight: 600; color: var(--text-primary); }
+.log-divider-match::before, .log-divider-match::after { border-top-width: 2px; }
+
+/* Log filters: two multi-select dropdowns (message types, players) */
+.log-filters { display: flex; gap: 6px; padding: 0 8px 8px 0; flex-shrink: 0; }
+.ms { position: relative; flex: 1; min-width: 0; }
+.ms-btn {
+    width: 100%;
+    font: inherit;
+    font-size: 12px;
+    padding: 4px 8px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-medium);
+    background: var(--bg-surface);
+    color: var(--text-primary);
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+}
+.ms-btn > span:first-child { overflow: hidden; text-overflow: ellipsis; }
+.ms-menu {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    width: max-content;
+    min-width: 100%;
+    max-width: 220px;
+    max-height: 240px;
+    overflow-y: auto;
+    z-index: 100;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-medium);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-modal);
+    padding: 4px;
+}
+.ms-right .ms-menu { left: auto; right: 0; }
+.ms-menu[hidden] { display: none; }
+.ms-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 8px;
+    border-radius: 4px;
+    font-size: 12.5px;
+    cursor: pointer;
+}
+.ms-item:hover { background: var(--bg-panel); }
+.ms-item span:last-child { overflow: hidden; text-overflow: ellipsis; }
+.ms-all { font-weight: 600; border-bottom: 1px solid var(--border-subtle); border-radius: 4px 4px 0 0; margin-bottom: 2px; }
+.ms-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dot); flex: none; }
+.ms-dot-play { --dot: var(--log-play-edge); }
+.ms-dot-draw { --dot: var(--log-draw-edge); }
+.ms-dot-quno { --dot: var(--log-quno-edge); }
+.ms-dot-room { --dot: var(--log-room-edge); }
+
+/* Entries hidden by the log filters */
+.log-filtered { display: none !important; }
+
+/* ── Score summary: a card in the empty right margin beside the table ── */
+.scoreboard {
+    display: none;
+    margin: 10px 0 0;
+    padding: 10px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-card);
+    z-index: 1;
+    cursor: pointer;          /* click for the full stats */
+}
+
+.scoreboard.has-scores { display: block; }
+.scoreboard:hover { border-color: var(--border-medium); }
+.scoreboard:focus-visible { outline: 2px solid var(--btn-active-bg); outline-offset: 2px; }
+
+/* By default the scores are a wrapped row above the table */
+#scoreboard-rows { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+
+/* When there's room, main.js moves the card beside the table (never over a player) and sets its left */
+/* No room beside the table: a row right under the header (main.js moves it there) */
+main > .scoreboard:not(.beside) { margin: 0 0 12px; }
+
+.scoreboard.beside {
+    position: absolute;       /* top is left automatic so it lines up with the table */
+    margin-top: 31px;         /* the table's own top margin, padding and seat margin */
+    width: 170px;
+}
+.scoreboard.beside #scoreboard-rows { display: block; }
+
+.scoreboard-title {
+    margin-bottom: 6px;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--text-secondary);
+}
+
+.score-row {
+    display: flex;
+    gap: 8px;
+    padding: 4px 6px;
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.score-row.own { background: rgba(59, 130, 246, 0.18); }
+.score-row.leader .score-name { font-weight: 600; }
+.score-badge { flex: none; }
+.score-rank { width: 12px; color: var(--text-secondary); }
+.score-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.score-points { font-weight: 700; }
+
+/* ── End of hand: winner ring, crown and score, and red chips for points given up ── */
+.player.winner {
+    background: var(--bg-surface);
+    box-shadow: 0 0 0 2px #BA7517, 0 0 0 5px rgba(186, 117, 23, 0.25);
+}
+
+.player.winner .name::before {
+    content: '';
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    margin-right: 6px;
+    vertical-align: -3px;
+    background-color: #8a5a12;
+    -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 8l4.5 4L12 5l4.5 7L21 8l-2 11H5z'/%3E%3C/svg%3E") center / contain no-repeat;
+    mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 8l4.5 4L12 5l4.5 7L21 8l-2 11H5z'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+[data-theme="dark"] .player.winner .name::before { background-color: #e0a94a; }
+
+/* Sits where the winner's (empty) hand would be */
+.winner-note {
+    position: absolute;
+    left: 10px;
+    right: 54px;
+    top: 34px;
+    height: calc(var(--card-height) * 0.6);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    pointer-events: none;
+}
+.winner-label { font-size: 11px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #8a5a12; }
+[data-theme="dark"] .winner-label { color: #e0a94a; }
+.winner-points { font-size: 34px; font-weight: 700; line-height: 1.1; color: var(--text-primary); }
+.winner-sub { font-size: 11px; color: var(--text-secondary); }
+
+.lost-chip {
+    position: absolute;
+    top: 7px;
+    right: 10px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: #b3303f;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+/* ── Quno call bubble ── */
+.player { position: relative; }
+
+.quno-bubble {
+    --qb-bg: #E1F5EE; --qb-fg: #085041; --qb-edge: #1D9E75;
+    position: absolute;
+    left: 12px;
+    bottom: calc(100% + 10px);
+    z-index: 50;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    background: var(--qb-bg);
+    color: var(--qb-fg);
+    border: 2px solid var(--qb-edge);
+    border-radius: 14px;
+    font-size: 15px;
+    font-weight: 700;
+    white-space: nowrap;
+    pointer-events: none;
+    animation: qb-pop 2.8s ease both;
+}
+
+/* Tail pointing down at the caller */
+.quno-bubble::after {
+    content: '';
+    position: absolute;
+    bottom: -9px;
+    left: 22px;
+    width: 14px;
+    height: 14px;
+    background: var(--qb-bg);
+    border-right: 2px solid var(--qb-edge);
+    border-bottom: 2px solid var(--qb-edge);
+    transform: rotate(45deg);
+}
+
+.qb-invalid { --qb-bg: #FAEEDA; --qb-fg: #633806; --qb-edge: #BA7517; }
+.qb-late    { --qb-bg: #F1EFE8; --qb-fg: #444441; --qb-edge: #888780; border-style: dashed; }
+.qb-struck  { text-decoration: line-through; }
+
+@keyframes qb-pop {
+    0%   { opacity: 0; transform: translateY(6px) scale(0.9); }
+    10%  { opacity: 1; transform: none; }
+    85%  { opacity: 1; transform: none; }
+    100% { opacity: 0; transform: none; }
+}
+
+@keyframes qb-fade {
+    0%   { opacity: 0; }
+    10%  { opacity: 1; }
+    85%  { opacity: 1; }
+    100% { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .quno-bubble { animation-name: qb-fade; }
 }

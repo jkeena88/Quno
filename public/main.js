@@ -20,6 +20,7 @@ let gameInProgress = false;
 let isDrawing = false;       // true while the server is dealing cards to this player
 let matchEverStarted = false;
 let isWaitlisted = false;    // true while waiting for a seat because the game is full
+let isPendingJoin = false;   // true while waiting to join at the start of the next hand
 
 const sidePanel = document.getElementById('side-panel');
 const collapseButton = document.getElementById('collapse-btn');
@@ -38,6 +39,8 @@ function hide(id) {
 function renderPlayerList(lobbyPlayers, hostName) {
     const playerListDiv = document.getElementById('playerList');
     playerListDiv.innerHTML = "<strong>Players:</strong>&nbsp;";
+
+    addLogPlayers(lobbyPlayers);
 
     lobbyPlayers.forEach(name => {
         const span = document.createElement('span');
@@ -64,7 +67,18 @@ function renderPlayerList(lobbyPlayers, hostName) {
 
 collapseButton.addEventListener('click', () => {
     sidePanel.classList.toggle('collapsed');
+    saveSetting('quno-panel-collapsed', sidePanel.classList.contains('collapsed'));
+    // the game area changes width as the panel animates; re-fit once it settles
+    setTimeout(() => { layoutAllHands(); placeScoreboard(); }, 300);
 });
+
+// Restore the side panel's collapsed state without animating it on page load
+if (loadSetting('quno-panel-collapsed') === 'true') {
+    sidePanel.style.transition = 'none';
+    sidePanel.classList.add('collapsed');
+    void sidePanel.offsetWidth;
+    sidePanel.style.transition = '';
+}
 
 // ── Socket event handlers ──
 
@@ -108,6 +122,7 @@ socket.on('rejoinState', function(state) {
     }
 
     createPlayersUI(state.playerList);
+    setScores(state.playerList);
 
     playersInLobby = state.playersInLobby;
     renderPlayerList(state.playersInLobby, state.hostName);
@@ -128,6 +143,7 @@ socket.on('rejoinState', function(state) {
     if (state.topCard) {
         let cardObj = getCardUI(state.topCard);
         cardObj.id = 'discard';
+        cardObj.style.rotate = tilt(state.topCard.ID);
         let discard = document.getElementById('discard');
         discard.parentNode.replaceChild(cardObj, discard);
         applyWildOverlay(state.topCard.Color === 'black' ? state.currentColor : null);
@@ -150,6 +166,7 @@ socket.on('rejoinState', function(state) {
 
 socket.on('setHost', function(name) {
     playerAName = name;
+    refreshWaitingText();
 });
 
 // Show host controls when this player becomes the host
@@ -195,6 +212,7 @@ socket.on('updateOptions', function(options) {
         stackDraw4:    'stackDraw4',
         skipDraw4:     'skipDraw4',
         reverseDraw4:  'reverseDraw4',
+        drawUntilPlay: 'drawUntilPlay',
     };
     for (const [key, name] of Object.entries(optionMap)) {
         const cb = document.querySelector(`input[name="${name}"]`);
@@ -210,6 +228,7 @@ socket.on('updateOptions', function(options) {
 
 socket.on('gameStarted', function(playerList) {
     if (isWaitlisted) return;
+    isPendingJoin = false;
     players = playerList.length;
     hide('waitingOverlay');
     gameInProgress = true;
@@ -228,10 +247,12 @@ socket.on('gameStarted', function(playerList) {
     if (self) playerId = self.PlayerID;
 
     createPlayersUI(playerList);
+    setScores(playerList);
 });
 
 // Show a holding message when the player joins mid-hand and must wait for the next deal
 socket.on('pendingJoin', function() {
+    isPendingJoin = true;
     const overlay = document.getElementById('waitingOverlay');
     overlay.textContent = 'A hand is in progress — you will join at the start of the next hand';
     overlay.style.display = 'flex';
@@ -248,8 +269,15 @@ socket.on('roomFull', function({ position, maxPlayers }) {
 // A seat opened up for us
 socket.on('roomJoined', function() {
     isWaitlisted = false;
-    document.getElementById('waitingOverlay').textContent = 'Waiting for the host to start the game';
+    refreshWaitingText();
 });
+
+// "Waiting for the host (Name) to start the game" — not shown over the full-room / next-hand messages
+function refreshWaitingText() {
+    if (isWaitlisted || isPendingJoin) return;
+    document.getElementById('waitingOverlay').textContent =
+        'Waiting for the host' + (playerAName ? ' (' + playerAName + ')' : '') + ' to start the game';
+}
 
 // Show or hide the waiting overlay for non-host players
 function updateWaitingOverlay() {
@@ -267,6 +295,9 @@ function updateWaitingOverlay() {
 socket.on('playerLeft', function({ playerId: leftPlayerId }) {
     const panel = document.getElementById('player_' + leftPlayerId);
     if (panel) panel.remove();
+    collapseUnusedSeats();
+    scores.delete(leftPlayerId);
+    renderScoreboard();
 });
 
 // The admin removed one of our cards
@@ -281,7 +312,9 @@ socket.on('newPlayer', function(data) {
     const {players: lobbyPlayers, host: hostName} = data;
 
     playersInLobby = lobbyPlayers;
+    playerAName = hostName;
     renderPlayerList(lobbyPlayers, hostName);
+    refreshWaitingText();
 
     if (isPlayerA) {
         updateStartButtonState();
@@ -356,17 +389,182 @@ socket.on('gameStatus', function({ cardsToDraw, playDirection }) {
     updateDirectionIndicator(cardsToDraw, playDirection);
 });
 
+// ── Score summary ──
+// A small card beside the table: everyone's name and points, highest first.
+const scores = new Map(); // PlayerID -> { name, points }
+
+// Clicking the scores opens the stats window
+document.getElementById('scoreboard').addEventListener('click', () => requestStats());
+document.getElementById('scoreboard').addEventListener('keydown', e => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); requestStats(); }
+});
+
+function setScores(playerList) {
+    scores.clear();
+    playerList.forEach(p => scores.set(p.PlayerID, { name: p.Name, points: p.Points }));
+    renderScoreboard();
+}
+
+// Medal for whoever has the most points, poop for whoever has the fewest.
+// Tied players share it, and nobody gets one when everyone is tied.
+function scoreBadge(points, allPoints) {
+    const max = Math.max(...allPoints);
+    const min = Math.min(...allPoints);
+    if (max === min) return '';
+    if (points === max) return '🥇';
+    if (points === min) return '💩';
+    return '';
+}
+
+function renderScoreboard() {
+    const box = document.getElementById('scoreboard');
+    const rows = document.getElementById('scoreboard-rows');
+    const list = Array.from(scores.values())
+        .sort((a, b) => (b.points - a.points) || a.name.localeCompare(b.name));
+
+    box.classList.toggle('has-scores', list.length > 0);
+    rows.textContent = '';
+
+    list.forEach(p => {
+        const rank = list.findIndex(q => q.points === p.points) + 1; // tied players share a rank
+        const row = document.createElement('div');
+        row.className = 'score-row' + (p.name === playerName ? ' own' : '') + (rank === 1 && p.points > 0 ? ' leader' : '');
+
+        // Names go in via textContent, so they are never parsed as HTML
+        const rankEl = document.createElement('span');
+        rankEl.className = 'score-rank';
+        rankEl.textContent = rank;
+        const nameEl = document.createElement('span');
+        nameEl.className = 'score-name';
+        nameEl.textContent = p.name;
+        nameEl.title = p.name;
+        const pointsEl = document.createElement('span');
+        pointsEl.className = 'score-points';
+        pointsEl.textContent = p.points;
+
+        const badge = scoreBadge(p.points, list.map(q => q.points));
+        if (badge) {
+            const badgeEl = document.createElement('span');
+            badgeEl.className = 'score-badge';
+            badgeEl.textContent = badge;
+            row.append(rankEl, nameEl, badgeEl, pointsEl);
+        } else {
+            row.append(rankEl, nameEl, pointsEl);
+        }
+        rows.appendChild(row);
+    });
+
+    placeScoreboard();
+}
+
+// Put the card beside the table (top right) when there's room, otherwise in a row under the header.
+// Beside means flush right, or just right of any player it would otherwise overlap.
+function placeScoreboard() {
+    const box = document.getElementById('scoreboard');
+    if (!box || !box.classList.contains('has-scores')) return;
+    const grid = document.getElementById('players');
+    const main = grid.parentElement;
+    const area = main.closest('.game-content') || document.body;
+
+    // Try beside the table first (that's where it lives, outside the grid)
+    if (box.nextElementSibling !== grid) main.insertBefore(box, grid);
+    box.classList.add('beside');
+    box.style.left = '';
+
+    const mainRect = main.getBoundingClientRect();
+    const boxRect = box.getBoundingClientRect();
+    const areaRight = area.getBoundingClientRect().left + area.clientWidth - 12;
+    const preferredRight = mainRect.right - parseFloat(getComputedStyle(main).paddingRight || 0);
+
+    // Everything the card must stay clear of: the player panels, both piles, the direction
+    // arrow and the cards themselves (a hand can spill out of its panel)
+    const things = [
+        ...Array.from(document.querySelectorAll('.playerOpponent, .playerSelf')).filter(el => el.querySelector('.player')),
+        ...document.querySelectorAll('.playArea1, .playArea2, .direction-indicator, .hand .card'),
+    ];
+    const inTheWay = things
+        .map(el => el.getBoundingClientRect())
+        .filter(r => r.width && r.bottom > boxRect.top && r.top < boxRect.bottom);
+    const clearOfPlayers = Math.max(0, ...inTheWay.map(r => r.right)) + 12;
+    const left = Math.max(clearOfPlayers, preferredRight - boxRect.width);
+
+    if (left + boxRect.width > areaRight) {
+        // No room beside the table: show the scores as a row right under the header
+        box.classList.remove('beside');
+        box.style.left = '';
+        main.insertBefore(box, main.firstElementChild);
+        return;
+    }
+    box.style.left = (left - mainRect.left) + 'px';
+}
+
+// Re-place the score card whenever anything it depends on changes size: the table's panels
+// (hands growing, names, fonts loading), the window, or the card itself
+let placeQueued = false;
+function schedulePlaceScoreboard() {
+    if (placeQueued) return;
+    placeQueued = true;
+    requestAnimationFrame(() => { placeQueued = false; placeScoreboard(); });
+}
+
+if (window.ResizeObserver) {
+    const watcher = new ResizeObserver(schedulePlaceScoreboard);
+    document.querySelectorAll('main, #scoreboard, .grid-item').forEach(el => watcher.observe(el));
+}
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(schedulePlaceScoreboard);
+
 // ── Pile heights ──
 // Draw pile shows up to 4 layers, discard pile up to 3 (top card + 2 beneath)
+// Draw pile thickness: two 1px edge layers per card, up to 7 cards' worth, so a small pile
+// is thin and a full one looks tall
+function pileShadow(cardCount) {
+    const layers = 2 * Math.min(cardCount, 7) - 1;
+    if (layers < 1) return '';
+    const edges = [];
+    for (let i = 1; i <= layers; i++) {
+        edges.push(`${i}px ${i}px 0 var(${i % 2 ? '--stack-edge-a' : '--stack-edge-b'})`);
+    }
+    edges.push(`${layers + 1}px ${layers + 2}px ${layers + 4}px rgba(0, 0, 0, 0.3)`);
+    return edges.join(', ');
+}
+
+// Discard pile: cards loosely scattered under the top one, one per card actually in the pile
+// (up to the number of entries here). Deeper cards are messier.
+const DISCARD_SCATTER = [
+    { x: -3, y: 2, r: -6 }, { x: 3, y: -1, r: 5 }, { x: -5, y: -3, r: -10 },
+    { x: 5, y: 3, r: 9 }, { x: -1, y: 5, r: -3 }, { x: 2, y: -5, r: 12 },
+];
+
+function updateDiscardUnderlay(discardArea, discardCount) {
+    const under = Math.min(Math.max(discardCount - 1, 0), DISCARD_SCATTER.length);
+    if (discardArea.dataset.under === String(under)) return;
+    discardArea.dataset.under = under;
+    discardArea.querySelectorAll('.discard-under').forEach(el => el.remove());
+    for (let i = under - 1; i >= 0; i--) { // deepest first
+        const s = DISCARD_SCATTER[i];
+        const el = document.createElement('div');
+        el.className = 'discard-under';
+        el.style.transform = `translate(-50%, -50%) translate(${s.x}px, ${s.y}px) rotate(${s.r}deg)`;
+        discardArea.appendChild(el);
+    }
+}
+
+// A small fixed tilt per card so the top of the discard pile doesn't look perfectly squared
+function tilt(cardId) {
+    return ((cardId * 37) % 9 - 4) + 'deg';
+}
+
 function updatePileVisuals({ deckCount, discardCount }) {
     const pile = document.querySelector('.playArea1 .pile');
     const discardArea = document.querySelector('.playArea2');
     if (pile) {
-        pile.dataset.count = Math.min(deckCount, 4);
+        pile.dataset.count = Math.min(deckCount, 7);
+        pile.style.boxShadow = pileShadow(deckCount);
         pile.title = `${deckCount} ${deckCount === 1 ? 'card' : 'cards'} left in draw pile`;
     }
     if (discardArea) {
-        discardArea.dataset.count = Math.min(discardCount, 3);
+        discardArea.dataset.count = Math.min(discardCount, DISCARD_SCATTER.length + 1);
+        updateDiscardUnderlay(discardArea, discardCount);
         discardArea.title = `${discardCount} ${discardCount === 1 ? 'card' : 'cards'} in discard pile`;
     }
 }
@@ -375,7 +573,8 @@ socket.on('pileStatus', updatePileVisuals);
 
 socket.on('turnChange', function(PlayerID) {
     document.querySelectorAll('.player').forEach(p => p.classList.remove('active'));
-    document.getElementById('player_' + PlayerID).classList.add('active');
+    const activeEl = document.getElementById('player_' + PlayerID); // none when the hand is over (-1)
+    if (activeEl) activeEl.classList.add('active');
 
     if(PlayerID == playerId) {
         playSound('audio/turn-change.wav');
@@ -406,17 +605,87 @@ socket.on('notCalledUnoMe', () => setUnoButtonState('btnUnoMe', false));
 socket.on('calledUnoYou',   () => setUnoButtonState('btnUnoYou', true));
 socket.on('notCalledUnoYou',() => setUnoButtonState('btnUnoYou', false));
 
+// ── Quno call bubble ──
+// Briefly shows a speech bubble over the caller's panel (visible to everyone):
+//   ✓ Quno!          called for themselves, valid
+//   ✕ Quno?          called for themselves at the wrong time
+//   ✕ Quno!  (struck) called for themselves, but someone else got there first
+//   ✓ Quno on Sam!   caught Sam
+//   ✕ Quno on Sam (struck) Sam had already called or been caught
+socket.on('qunoCall', function({ playerId: callerId, kind, result, targets }) {
+    const panel = document.getElementById('player_' + callerId);
+    if (!panel) return;
+    panel.querySelectorAll('.quno-bubble').forEach(b => b.remove());
+
+    const word = kind === 'other' ? 'Quno on ' + targets.join(' & ') : 'Quno';
+    const mark = result === 'invalid' ? '?' : (kind === 'other' && result === 'late' ? '' : '!');
+
+    const bubble = document.createElement('div');
+    bubble.className = 'quno-bubble qb-' + result;
+    bubble.setAttribute('role', 'status');
+
+    // Names go in via textContent, so they are never parsed as HTML
+    const icon = document.createElement('span');
+    icon.textContent = result === 'ok' ? '✓' : '✕';
+    const label = document.createElement('span');
+    label.textContent = word + mark;
+    if (result === 'late') label.classList.add('qb-struck');
+
+    bubble.append(icon, label);
+    panel.appendChild(bubble);
+    bubble.addEventListener('animationend', () => bubble.remove());
+});
+
 socket.on('updateScore', function(player, points, handsWon) {
     document.getElementById('points_' + player).innerHTML = 'Points: ' + points;
     document.getElementById('handsWon_' + player).innerHTML = 'Hands Won: ' + handsWon;
+
+    const entry = scores.get(player);
+    if (entry) {
+        entry.points = points;
+        renderScoreboard();
+    }
+});
+
+// After a hand: ring and crown on the winner, the points they won in their empty hand area,
+// and a red chip on everyone else showing the points they gave up
+socket.on('handResult', function({ winner, points, breakdown }) {
+    document.querySelectorAll('.player').forEach(panel => {
+        const nameEl = panel.querySelector('.name');
+        if (!nameEl) return;
+        const name = nameEl.textContent;
+
+        if (name === winner) {
+            panel.classList.add('winner');
+            const note = document.createElement('div');
+            note.className = 'winner-note';
+            const label = document.createElement('span');
+            label.className = 'winner-label';
+            label.textContent = 'Winner';
+            const pts = document.createElement('span');
+            pts.className = 'winner-points';
+            pts.textContent = '+' + points;
+            const sub = document.createElement('span');
+            sub.className = 'winner-sub';
+            sub.textContent = points === 1 ? 'point this hand' : 'points this hand';
+            note.append(label, pts, sub);
+            panel.appendChild(note);
+        } else {
+            const lost = breakdown.find(b => b.name === name);
+            if (lost && lost.points > 0) {
+                const chip = document.createElement('span');
+                chip.className = 'lost-chip';
+                chip.textContent = '\u2212' + lost.points;
+                chip.title = 'Points given up this hand';
+                panel.appendChild(chip);
+            }
+        }
+    });
 });
 
 socket.on('gameOver', function(playerName) {
     playSound('audio/game-over.wav');
     gameInProgress = false;
-
-    document.getElementById('status').innerHTML = playerName + ' WON';
-    show('status', 'inline-block');
 
     if(isPlayerA) {
         show('btnDeal', 'inline-block');
@@ -514,38 +783,240 @@ socket.on('drawEnd', function() {
     }
 });
 
-// Append a message to the game log, colorizing any color names found in the text
-socket.on('logMessage', function(message) {
-    const messageContainer = document.getElementById('message-container');
-    const messageElement = document.createElement('div');
-    messageElement.classList.add('message');
+// ── Game log ──
+const LOG_TYPES = {
+    play: { icon: '🃏' },
+    draw: { icon: '📥' },
+    quno: { icon: '📣' },
+    room: { icon: '🎲' },
+};
+const PILL_COLORS = ['red', 'yellow', 'green', 'blue', 'black'];
 
-    const colors = {
-        red: '#FF5555',
-        yellow: '#FFAA01',
-        green: '#55AA55',
-        blue: '#5455FF',
-        black: '#a0a0a0'
-    };
-    let formattedMessage = message;
+function cardLabel(color, type) {
+    const t = { draw2: 'draw 2', draw4: 'draw 4' }[type] ?? type;
+    return color === 'black' ? String(t) : color + ' ' + t;
+}
 
-    for (const [color, hex] of Object.entries(colors)) {
-        const regex = new RegExp(`\\b${color}\\b`, 'gi');
-        formattedMessage = formattedMessage.replace(
-            regex,
-            `<span style="color: ${hex}; font-weight: bold;">${color}</span>`
-        );
+// Parts are plain strings or { card } / { color }. Everything goes in via textContent,
+// so player names are never parsed as HTML and never colored.
+function buildLogPart(part) {
+    if (typeof part === 'string') return document.createTextNode(part);
+    const color = part.card ? part.card.color : part.color;
+    const label = part.card ? cardLabel(part.card.color, part.card.type) : part.color;
+    const span = document.createElement('span');
+    span.textContent = label;
+    if (PILL_COLORS.includes(color)) span.className = 'log-pill log-pill-' + color;
+    return span;
+}
+
+socket.on('logMessage', function(entry) {
+    const container = document.getElementById('message-container');
+    const el = document.createElement('div');
+    el.title = new Date(entry.t).toLocaleTimeString();
+
+    if (entry.type === 'divider') {
+        el.className = 'log-divider log-divider-' + (entry.level === 'match' ? 'match' : 'hand');
+        el.textContent = entry.parts.join('');
+        container.insertBefore(el, container.firstChild);
+        return;
     }
 
-    messageElement.innerHTML = formattedMessage;
-    messageContainer.insertBefore(messageElement, messageContainer.firstChild);
+    const type = LOG_TYPES[entry.type] ? entry.type : 'room';
+    el.className = 'message log-entry log-' + type;
+    el.dataset.cat = type;
+
+    const icon = document.createElement('span');
+    icon.className = 'log-icon';
+    icon.textContent = LOG_TYPES[type].icon;
+
+    const text = document.createElement('span');
+    text.className = 'log-text';
+    entry.parts.forEach(p => text.appendChild(buildLogPart(p)));
+
+    el.append(icon, text);
+
+    el._affects = entry.affects || [];
+    addLogPlayers(el._affects);
+
+    if ((entry.affects || []).includes(playerName)) {
+        el.classList.add('affects-you');
+        const tag = document.createElement('span');
+        tag.className = 'log-you-tag';
+        tag.textContent = 'you';
+        el.appendChild(tag);
+    }
+
+    if (!entryVisible(el)) el.classList.add('log-filtered');
+    container.insertBefore(el, container.firstChild);
 });
+
+// ── Log filters ──
+// A dropdown of checkboxes with a "Select all" row. Anything not unchecked counts as selected,
+// so new items (such as a player who joins later) start out selected.
+function createMultiSelect(root, label, onChange, storageKey) {
+    const deselected = new Set();
+    // With a storageKey, the unchecked items are remembered between visits
+    if (storageKey) {
+        try { JSON.parse(loadSetting(storageKey) || '[]').forEach(v => deselected.add(v)); } catch (e) {}
+    }
+    const saveSelection = () => {
+        if (storageKey) saveSetting(storageKey, JSON.stringify(Array.from(deselected)));
+    };
+    let items = [];   // [{ value, text, dot? }]
+    let allCb = null;
+    let itemCbs = [];
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'ms-btn';
+    btn.setAttribute('aria-haspopup', 'true');
+    btn.setAttribute('aria-expanded', 'false');
+    const btnText = document.createElement('span');
+    const caret = document.createElement('span');
+    caret.textContent = '▾';
+    btn.append(btnText, caret);
+
+    const menu = document.createElement('div');
+    menu.className = 'ms-menu';
+    menu.hidden = true;
+    root.append(btn, menu);
+
+    const selectedCount = () => items.filter(i => !deselected.has(i.value)).length;
+
+    // Refresh the button text and the Select all checkbox to match the current selection
+    function sync() {
+        const n = selectedCount();
+        btnText.textContent = label + ': ' + (n === items.length ? 'All' : n === 0 ? 'None' : n + ' of ' + items.length);
+        if (allCb) {
+            allCb.checked = n === items.length;
+            allCb.indeterminate = n > 0 && n < items.length;
+        }
+    }
+
+    function makeRow(text, cls, dot) {
+        const row = document.createElement('label');
+        row.className = 'ms-item ' + cls;
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        row.appendChild(cb);
+        if (dot) {
+            const d = document.createElement('span');
+            d.className = 'ms-dot ms-dot-' + dot;
+            row.appendChild(d);
+        }
+        const t = document.createElement('span');
+        t.textContent = text;   // names go in via textContent, so they are never parsed as HTML
+        row.appendChild(t);
+        menu.appendChild(row);
+        return cb;
+    }
+
+    function render() {
+        menu.textContent = '';
+
+        allCb = makeRow('Select all', 'ms-all');
+        allCb.addEventListener('change', () => {
+            // Everything selected → clear it all; otherwise select everything
+            const selectAll = selectedCount() !== items.length;
+            deselected.clear();
+            if (!selectAll) items.forEach(i => deselected.add(i.value));
+            itemCbs.forEach(cb => { cb.checked = selectAll; });
+            saveSelection();
+            sync();
+            onChange();
+        });
+
+        itemCbs = items.map(item => {
+            const cb = makeRow(item.text, '', item.dot);
+            cb.checked = !deselected.has(item.value);
+            cb.addEventListener('change', () => {
+                if (cb.checked) deselected.delete(item.value); else deselected.add(item.value);
+                saveSelection();
+                sync();
+                onChange();
+            });
+            return cb;
+        });
+        sync();
+    }
+
+    function setOpen(open) {
+        menu.hidden = !open;
+        btn.setAttribute('aria-expanded', String(open));
+    }
+
+    btn.addEventListener('click', () => setOpen(menu.hidden));
+    document.addEventListener('click', e => { if (!root.contains(e.target)) setOpen(false); });
+    root.addEventListener('keydown', e => {
+        if (e.key === 'Escape' && !menu.hidden) { setOpen(false); btn.focus(); }
+    });
+
+    render();
+
+    return {
+        setItems(newItems) { items = newItems; render(); },
+        isSelected: value => !deselected.has(value),
+        allSelected: () => selectedCount() === items.length,
+    };
+}
+
+// An entry shows if its type is selected and, unless everything in the Players list is selected,
+// it concerns a selected player (or concerns no one in particular and "No specific player"
+// is selected). Dividers between hands are always shown.
+function entryVisible(el) {
+    if (el.classList.contains('log-divider')) return true;
+    if (!typeFilter.isSelected(el.dataset.cat)) return false;
+    if (playerFilter.allSelected()) return true;
+    const affects = el._affects || [];
+    if (affects.length === 0) return playerFilter.isSelected(NO_PLAYER);
+    return affects.some(name => playerFilter.isSelected(name));
+}
+
+function applyLogFilters() {
+    document.querySelectorAll('#message-container > div').forEach(el => {
+        el.classList.toggle('log-filtered', !entryVisible(el));
+    });
+}
+
+const typeFilter = createMultiSelect(document.getElementById('filter-types'), 'Types', applyLogFilters, 'quno-log-types');
+typeFilter.setItems([
+    { value: 'play', text: 'Play', dot: 'play' },
+    { value: 'draw', text: 'Draw', dot: 'draw' },
+    { value: 'quno', text: 'Quno', dot: 'quno' },
+    { value: 'room', text: 'Table & room', dot: 'room' },
+]);
+
+// The player list grows as names show up in the lobby or the log. It also has a
+// "No specific player" item for entries that aren't about anyone (a Symbol, so it can't clash with a name).
+const NO_PLAYER = Symbol('no specific player');
+const playerFilter = createMultiSelect(document.getElementById('filter-players'), 'Players', applyLogFilters);
+const logPlayers = [];
+function refreshPlayerItems() {
+    playerFilter.setItems([
+        { value: NO_PLAYER, text: 'No specific player' },
+        ...logPlayers.map(name => ({ value: name, text: name })),
+    ]);
+}
+refreshPlayerItems();
+function addLogPlayers(names) {
+    let added = false;
+    names.forEach(name => {
+        if (name && !logPlayers.includes(name)) { logPlayers.push(name); added = true; }
+    });
+    if (!added) return;
+    logPlayers.sort((a, b) => a.localeCompare(b));
+    refreshPlayerItems();
+}
 
 // Display a rich log entry when the host changes game options
 socket.on('optionsChanged', function({ changedBy, options, labels }) {
     const messageContainer = document.getElementById('message-container');
     const el = document.createElement('div');
-    el.classList.add('message');
+    el.classList.add('message', 'log-room');
+    el.dataset.cat = 'room';
+    el.title = new Date().toLocaleTimeString();
+    el._affects = [changedBy];
+    addLogPlayers(el._affects);
 
     const rows = Object.entries(labels).map(([key, label]) => {
         const on = !!options[key];
@@ -564,6 +1035,7 @@ socket.on('optionsChanged', function({ changedBy, options, labels }) {
         </div>
         ${rows}
     `;
+    if (!entryVisible(el)) el.classList.add('log-filtered');
     messageContainer.insertBefore(el, messageContainer.firstChild);
 });
 
@@ -800,7 +1272,6 @@ function getCardUI(card, player) {
         cardObj.style.backgroundRepeat = 'no-repeat';
 
         // Colorblind accessibility pattern overlay
-        cardObj.style.position = 'relative';
         const patternOverlay = getColorPatternSVG(card.Color);
         if (patternOverlay) cardObj.appendChild(patternOverlay);
 
@@ -815,131 +1286,94 @@ function getCardUI(card, player) {
     return cardObj;
 }
 
-// Reposition cards within a hand, applying fan overlap.
-// Own hand is sorted by color then type; opponent hands just stack in order.
-//
-// Overlap rules:
-//   - Cards are 107px CSS wide, rendered at scale(0.6) → 64.2px visual width.
-//   - CSS margin-left is pre-scale, so visual overlap = |marginLeft| * 0.6.
-//   - Opponents: minimum starting CSS margin = -70px (~65% overlap).
-//     Cards compress up to 75% visual overlap (CSS -80px) before the hand expands.
-//   - Own hand: minimum starting CSS margin = -57px (~53% overlap).
-//     Cards compress up to 60% visual overlap (CSS -64px) before the hand expands.
-//   - In both cases the hand uses as much available container space as possible
-//     before applying any extra overlap beyond the starting minimum.
-function layoutHand(player) {
-    const hand = document.getElementById('hand_' + player.PlayerID);
-    if (!hand) return;
+// ── Hand layout ──
+// Every seat is a fixed size, so a hand never resizes its panel. Cards are positioned inside
+// the hand: a fan that tightens as it fills, and wraps onto more rows once it can't tighten
+// any further (your own hand, and every hand once it is revealed at the end).
+const HAND_CARD_W = 107 * 0.6;   // drawn width of a card
+const HAND_CARD_H = 160 * 0.6;   // drawn height of a card
+const HAND_ROW_STEP = 36;        // each extra row sits this far below the one above it
+const HAND_LEFT_PAD = 10;
+const HAND_RIGHT_RESERVE = 54;   // room kept on the right for the card-count circle
+const OPPONENT_VISIBLE_CAP = 10; // face-down opponent hands show at most this many card backs
 
+// maxAdvance: the furthest apart neighbouring cards ever sit (so they always overlap a little).
+// minAdvance: the tightest a row gets before the hand wraps onto another row.
+// visible: how many of the hand's cards are shown (the rest stay hidden).
+function placeHand(hand, { maxAdvance, minAdvance, visible }) {
     const cards = Array.from(hand.children);
-    const cardCount = cards.length;
+    cards.forEach((card, i) => { card.style.display = i < visible ? '' : 'none'; });
+    const shown = cards.slice(0, visible);
 
-    // Visual card width at 0.6 scale
-    const CSS_CARD_W = 107;
-    const SCALE      = 0.6;
-    const VIS_W      = CSS_CARD_W * SCALE; // 64.2px
-    const CARD_MARGIN_R = 3;               // the card's right margin from style.css
+    const panel = hand.closest('.player');
+    const usableW = (panel ? panel.clientWidth : hand.clientWidth) - HAND_LEFT_PAD - HAND_RIGHT_RESERVE;
+    const perRowMax = Math.max(1, Math.floor((usableW - HAND_CARD_W) / minAdvance) + 1);
+    const rows = Math.max(1, Math.ceil(shown.length / perRowMax));
+    const perRow = Math.max(1, Math.ceil(shown.length / rows)); // spread evenly over the rows
+    const advance = perRow > 1 ? Math.min(maxAdvance, (usableW - HAND_CARD_W) / (perRow - 1)) : 0;
 
-    if (player.SocketID == socketId) {
-        // ── Own hand ──
-        // Sort by color then type so the fan is visually organised.
+    shown.forEach((card, i) => {
+        card.style.left = (HAND_LEFT_PAD + (i % perRow) * advance) + 'px';
+        card.style.top = (Math.floor(i / perRow) * HAND_ROW_STEP) + 'px';
+    });
+    hand.style.height = (HAND_CARD_H + (rows - 1) * HAND_ROW_STEP + 8) + 'px';
+}
+
+function layoutHandEl(hand) {
+    const cards = Array.from(hand.children);
+
+    if (hand.closest('.playerSelf')) {
+        // Own hand: sorted by color then type so the fan is organised
         cards.sort((a, b) => {
             const colorDiff = a.getAttribute('dataCardColor').localeCompare(b.getAttribute('dataCardColor'));
             if (colorDiff !== 0) return colorDiff;
             return a.getAttribute('dataCardType').localeCompare(b.getAttribute('dataCardType'));
         });
-
-        hand.innerHTML = '';
-
-        if (cardCount <= 1) {
-            cards.forEach(card => { card.style.marginLeft = '0px'; hand.appendChild(card); });
-            return;
-        }
-
-        // CSS margin limits (negative = overlap)
-        const MIN_MARGIN = hand.dataset.revealed ? -57 : -82;  // revealed hands overlap less so faces are readable
-        const MAX_MARGIN = -64;  // maximum allowed overlap before container must expand (~60% visual)
-
-        // How wide is the hand's grid cell? Walk up to the grid item (.playerOpponent /
-        // .playerSelf) for a stable measurement; the .hand div itself has no fixed width.
-        const gridCell = hand.closest('.playerOpponent, .playerSelf');
-        const containerW = (gridCell ? gridCell.offsetWidth : hand.offsetWidth) || 600;
-        // Padding-left (10px) eats into usable width
-        const usableW = containerW - 10;
-
-        // Margin needed to fit all cards exactly in the container:
-        // usableW = VIS_W + (cardCount-1) * (VIS_W + margin*SCALE)
-        // → margin = ((usableW - VIS_W) / (cardCount-1) - VIS_W) / SCALE
-        const fitMargin = ((usableW - VIS_W) / (cardCount - 1) - VIS_W) / SCALE;
-
-        // Clamp: don't overlap more than necessary, but never less than MAX_MARGIN
-        const margin = Math.max(MAX_MARGIN, Math.min(MIN_MARGIN, fitMargin));
-
-        cards.forEach((card, i) => {
-            card.style.marginLeft = (i === 0 ? 0 : margin) + 'px';
-            hand.appendChild(card);
-        });
-
+        cards.forEach(card => hand.appendChild(card));
+        placeHand(hand, { maxAdvance: 46, minAdvance: 32, visible: cards.length });
+    } else if (hand.dataset.revealed) {
+        // Revealed at the end of a hand: show every card, wrapping so the faces stay readable
+        placeHand(hand, { maxAdvance: 46, minAdvance: 26, visible: cards.length });
     } else {
-        // ── Opponent hand ──
-        hand.innerHTML = '';
-
-        if (cardCount <= 1) {
-            cards.forEach(card => { card.style.marginLeft = '0px'; hand.appendChild(card); });
-            return;
-        }
-
-        const MIN_MARGIN = -82;  // starting overlap at low card counts
-
-        const gridCell = hand.closest('.playerOpponent, .playerSelf');
-        const containerW = (gridCell ? gridCell.offsetWidth : hand.offsetWidth) || 200;
-        const usableW = containerW - 10;
-
-        // Margins aren't scaled by the card's transform, so each card advances by
-        // CSS_CARD_W + its right margin + marginLeft. Solve for the margin that
-        // makes the whole fan fit inside the cell.
-        const fitMargin = (usableW - VIS_W) / (cardCount - 1) - CSS_CARD_W - CARD_MARGIN_R;
-
-        // No lower limit: always compress as much as needed to stay inside the cell
-        const margin = Math.min(MIN_MARGIN, fitMargin);
-
-        cards.forEach((card, i) => {
-            card.style.marginLeft = (i === 0 ? 0 : margin) + 'px';
-            hand.appendChild(card);
-        });
+        // Face-down opponent: a capped fan of card backs (the circle gives the real count)
+        placeHand(hand, { maxAdvance: 30, minAdvance: 10, visible: Math.min(cards.length, OPPONENT_VISIBLE_CAP) });
     }
+}
+
+function layoutHand(player) {
+    const hand = document.getElementById('hand_' + player.PlayerID);
+    if (hand) layoutHandEl(hand);
+}
+
+function layoutAllHands() {
+    document.querySelectorAll('.player .hand').forEach(layoutHandEl);
 }
 
 function repositionCards(player) {
     layoutHand(player);
-    scheduleOpponentRefit();
+    updateCardCounts();
+    schedulePlaceScoreboard();
 }
 
-// Cell widths are shared between players, so when any hand changes (or the window
-// resizes) every opponent hand is re-fitted. A few passes let the widths settle.
-let refitQueued = false;
-
-function opponentCellWidths() {
-    return Array.from(document.querySelectorAll('.playerOpponent'))
-        .map(cell => cell.offsetWidth).join(',');
-}
-
-function scheduleOpponentRefit() {
-    if (refitQueued) return;
-    refitQueued = true;
-    requestAnimationFrame(() => {
-        refitQueued = false;
-        for (let pass = 0; pass < 3; pass++) {
-            const before = opponentCellWidths();
-            document.querySelectorAll('.playerOpponent .hand').forEach(h => {
-                layoutHand({ SocketID: null, PlayerID: h.id.replace('hand_', '') });
-            });
-            if (opponentCellWidths() === before) break;
-        }
+// The number in each player's circle, taken from the cards actually in their hand
+function updateCardCounts() {
+    document.querySelectorAll('.card-count').forEach(el => {
+        const hand = document.getElementById('hand_' + el.id.replace('cards_', ''));
+        const n = hand ? hand.children.length : 0;
+        el.textContent = n;
+        el.title = n + (n === 1 ? ' card' : ' cards');
+        el.setAttribute('aria-label', el.title);
+        el.classList.toggle('one', n === 1);
     });
 }
 
-window.addEventListener('resize', scheduleOpponentRefit);
+window.addEventListener('resize', layoutAllHands);
+window.addEventListener('resize', placeScoreboard);
+
+// Seats are fixed, but their width follows the window (and the side panel opening/closing)
+if (window.ResizeObserver) {
+    new ResizeObserver(layoutAllHands).observe(document.getElementById('players'));
+}
 
 // Highlight playable cards and dim unplayable ones based on the current game state
 function updatePlayableCards(topCard, currentColor) {
@@ -1013,6 +1447,7 @@ socket.on('discardCard', function(card, player) {
 
     let cardObj = getCardUI(card);
     cardObj.id = 'discard';
+    cardObj.style.rotate = tilt(card.ID);
 
     // Initial deal — no animation, just swap the placeholder immediately
     if (player == null) {
@@ -1040,7 +1475,7 @@ socket.on('discardCard', function(card, player) {
         // For opponents, removeOpponentCard handles DOM removal and repositionCards.
         // Snapshot for animation before it's removed.
         const hand = document.getElementById('hand_' + player.PlayerID);
-        const sourceEl = hand ? hand.lastElementChild : null;
+        const sourceEl = hand ? Array.from(hand.children).filter(c => c.style.display !== 'none').pop() : null;
         const srcRect = sourceEl ? sourceEl.getBoundingClientRect() : null;
 
         let discard = document.getElementById('discard');
@@ -1071,12 +1506,60 @@ socket.on('demoted', function() {
 
 // ── Persistence ──
 
+// Small localStorage wrappers; storage can be unavailable (e.g. private browsing), so failures are ignored
+function loadSetting(key) {
+    try { return localStorage.getItem(key); } catch (e) { return null; }
+}
+
+function saveSetting(key, value) {
+    try { localStorage.setItem(key, value); } catch (e) {}
+}
+
+// Renaming: the server checks the name is free, then tells us (and everyone else)
+function changeName() {
+    const requested = document.getElementById('player-name').value.trim();
+    document.getElementById('name-msg').textContent = '';
+    if (!requested || requested === playerName) return;
+    socket.emit('changeName', requested);
+}
+
+socket.on('nameAccepted', function(newName) {
+    playerName = newName;
+    savePlayerName(newName);
+    document.getElementById('player-name').value = newName;
+    document.getElementById('header-name').textContent = newName;
+    document.getElementById('name-msg').textContent = '';
+    closePopover('name-popover', 'nameToggle');
+});
+
+socket.on('nameRejected', function(message) {
+    document.getElementById('name-msg').textContent = message;
+});
+
+// Someone (maybe us) renamed: update their name on the table
+socket.on('nameChanged', function({ playerId: renamedId, newName }) {
+    const panel = document.getElementById('player_' + renamedId);
+    const nameEl = panel && panel.querySelector('.name');
+    if (nameEl) nameEl.textContent = newName;
+
+    const entry = scores.get(renamedId);
+    if (entry) {
+        entry.name = newName;
+        renderScoreboard();
+    }
+});
+
+document.getElementById('btn-rename').addEventListener('click', changeName);
+document.getElementById('player-name').addEventListener('keydown', e => {
+    if (e.key === 'Enter') changeName();
+});
+
 function savePlayerName(name) {
-    localStorage.setItem('playerName', name);
+    saveSetting('playerName', name);
 }
 
 function getSavedPlayerName() {
-    return localStorage.getItem('playerName');
+    return loadSetting('playerName');
 }
 
 // ── Game action buttons ──
@@ -1097,6 +1580,16 @@ function setColor(color) {
 
 // Build player panels around the table. The local player goes in the bottom slot;
 // opponents are placed in the surrounding grid positions relative to seat order.
+// Hide the seats of any row nobody is sitting in, so empty rows take no space.
+// (The middle rows share the piles, which keep their own minimum height.)
+function collapseUnusedSeats() {
+    [[0, 1, 2], [3, 4], [5, 6]].forEach(ids => {
+        const seats = ids.map(i => document.getElementById('player' + i));
+        const used = seats.some(el => el.querySelector('.player'));
+        seats.forEach(el => el.classList.toggle('seat-collapsed', !used));
+    });
+}
+
 function createPlayersUI(players) {
     for (let i = 0; i < 7;  i++) {
         document.getElementById('player' + i).innerHTML = '';
@@ -1132,8 +1625,17 @@ function createPlayersUI(players) {
         div_hands_won.innerHTML = 'Hands Won: ' + players[i].HandsWon;
         div_player.appendChild(div_player_name);
         div_player.appendChild(div_hand);
-        div_player.appendChild(div_points);
-        div_player.appendChild(div_hands_won);
+
+        // Footer row: points and hands won
+        const div_footer = document.createElement('div');
+        div_footer.className = 'player-footer';
+        const div_cards = document.createElement('div');
+        div_cards.className = 'card-count';
+        div_cards.id = 'cards_' + players[i].PlayerID;
+        div_cards.textContent = '0';
+        div_footer.append(div_points, div_hands_won);
+        div_player.appendChild(div_footer);
+        div_player.appendChild(div_cards);   // the count sits in a circle at the right of the hand
         if(players[i].SocketID == socketId) {
             document.getElementById('playerSelf').appendChild(div_player);
         } else {
@@ -1150,6 +1652,8 @@ function createPlayersUI(players) {
             document.getElementById('player' + player_location).appendChild(div_player);
         }
     }
+
+    collapseUnusedSeats();
 }
 
 function unoCall(type) {
@@ -1205,11 +1709,13 @@ function init() {
         if (playerName === null || playerName === "") {
             playerName = defaultName;
         } else {
-            savePlayerName(playerName);
+            savePlayerName(playerName.substring(0, 29));
         }
     }
 
     playerName = playerName.substring(0, 29);
+    document.getElementById('player-name').value = playerName;
+    document.getElementById('header-name').textContent = playerName;
 
     socket.connect();
 }
@@ -1250,9 +1756,61 @@ function showResetConfirm() {
     };
 }
 
+// Master sound settings (volume slider and mute in the side panel), remembered between visits
+let soundVolume = 1;   // 0 to 1
+let soundMuted = false;
+
+(function initSoundSettings() {
+    const slider = document.getElementById('sound-volume');
+    const label = document.getElementById('sound-volume-label');
+    const mute = document.getElementById('sound-mute');
+
+    try {
+        const saved = parseFloat(localStorage.getItem('quno-volume'));
+        if (!isNaN(saved)) soundVolume = Math.min(1, Math.max(0, saved));
+        soundMuted = localStorage.getItem('quno-muted') === 'true';
+    } catch (e) {}
+
+    // Waves become a slash on the header icon when sound is muted or at zero
+    function updateIcon() {
+        document.getElementById('soundToggle').classList.toggle('is-muted', soundMuted || soundVolume === 0);
+    }
+
+    function showSettings() {
+        slider.value = Math.round(soundVolume * 100);
+        label.textContent = Math.round(soundVolume * 100) + '%';
+        mute.checked = soundMuted;
+        updateIcon();
+    }
+
+    slider.addEventListener('input', () => {
+        soundVolume = slider.value / 100;
+        label.textContent = slider.value + '%';
+        try { localStorage.setItem('quno-volume', soundVolume); } catch (e) {}
+        updateIcon();
+    });
+
+    mute.addEventListener('change', () => {
+        soundMuted = mute.checked;
+        try { localStorage.setItem('quno-muted', soundMuted); } catch (e) {}
+        updateIcon();
+    });
+
+    showSettings();
+
+    // The chosen draw sound is remembered too
+    const drawSound = document.getElementById('draw-sound');
+    const savedSound = loadSetting('quno-draw-sound');
+    if (savedSound && Array.from(drawSound.options).some(o => o.value === savedSound)) {
+        drawSound.value = savedSound;
+    }
+    drawSound.addEventListener('change', () => saveSetting('quno-draw-sound', drawSound.value));
+})();
+
 function playSound(src, volume=1.0) {
+    if (soundMuted || soundVolume === 0) return;
     const audio = new Audio(src);
-    audio.volume = volume;
+    audio.volume = Math.min(1, volume * soundVolume);
     audio.play();
 }
 
@@ -1334,6 +1892,7 @@ function renderHandSummary(summary, isReview) {
     const handTurnRows = buildTurnRows('handCardsPlayed', 'handTurnTime');
     const matchTurnRows = buildTurnRows('matchCardsPlayed', 'matchTurnTime');
 
+    const scoredAll = ps.map(p => p.pointsScored);
     const standingRows = ps
         .slice()
         .sort((a, b) => (b.pointsScored - a.pointsScored) || (b.netPoints - a.netPoints))
@@ -1341,7 +1900,7 @@ function renderHandSummary(summary, isReview) {
             const netColor = p.netPoints >= 0 ? 'color:#3db87a;font-weight:600;' : 'color:#c94f5f;font-weight:600;';
             const netStr = (p.netPoints >= 0 ? '+' : '') + p.netPoints;
             return `<tr${rowClass(p.name)}>
-                <td style="${tdStyle}font-weight:600;">${truncate(p.name)}</td>
+                <td style="${tdStyle}font-weight:600;">${truncate(p.name)} ${scoreBadge(p.pointsScored, scoredAll)}</td>
                 <td style="${tdRight}">${p.pointsScored}</td>
                 <td style="${tdRight}">${p.pointsGivenUp}</td>
                 <td style="${tdRight}${netColor}">${netStr}</td>
@@ -1510,6 +2069,39 @@ masterCheckbox.addEventListener('click', () => {
     const isChecked = masterCheckbox.checked;
     controlledCheckboxes.forEach(checkbox => { checkbox.checked = isChecked; });
 });
+
+// ── Header popovers (name, sound) ──
+function closePopover(popoverId, buttonId) {
+    document.getElementById(popoverId).hidden = true;
+    document.getElementById(buttonId).setAttribute('aria-expanded', 'false');
+}
+
+function setupPopover(popoverId, buttonId, focusId) {
+    const pop = document.getElementById(popoverId);
+    const btn = document.getElementById(buttonId);
+
+    btn.addEventListener('click', () => {
+        const open = pop.hidden;
+        pop.hidden = !open;
+        btn.setAttribute('aria-expanded', String(open));
+        if (open && focusId) {
+            const field = document.getElementById(focusId);
+            field.focus();
+            if (field.select) field.select();
+        }
+    });
+
+    // Click elsewhere, or press Escape, to close
+    document.addEventListener('click', e => {
+        if (!pop.hidden && !pop.contains(e.target) && !btn.contains(e.target)) closePopover(popoverId, buttonId);
+    });
+    pop.addEventListener('keydown', e => {
+        if (e.key === 'Escape') { closePopover(popoverId, buttonId); btn.focus(); }
+    });
+}
+
+setupPopover('name-popover', 'nameToggle', 'player-name');
+setupPopover('sound-popover', 'soundToggle', 'sound-volume');
 
 setOptionsEditable(false);
 init();
