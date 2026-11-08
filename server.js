@@ -68,7 +68,7 @@ let drawUntilPlay = false;  // keep drawing until a card can be played (Uno rule
 
 // Snapshot of every option, as sent to clients and the admin page
 function currentOptions() {
-    return { playWildDraw4, stackDraw2, skipDraw2, reverseDraw2, skipSkip, stackDraw4, skipDraw4, reverseDraw4 };
+    return { playWildDraw4, drawUntilPlay, stackDraw2, skipDraw2, reverseDraw2, skipSkip, stackDraw4, skipDraw4, reverseDraw4 };
 }
 
 // All card types — used to build the "excluded" list when checking who can stack
