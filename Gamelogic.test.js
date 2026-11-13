@@ -8,7 +8,7 @@ const {
     cardColor, cardType, cardValue, buildCard,
     createDeck, shuffle,
     canPlay, getPoints, nextPlayerID, reshuffleSeats,
-    buildRequiredPlay, computeHandMargin, recordDrawStats,
+    buildRequiredPlay, computeHandMargin, recordDrawStats, clearQunoCallOnDraw,
 } = require('./Gamelogic');
 
 // Test-only helper: build a minimal player object
@@ -1090,5 +1090,32 @@ describe('recordDrawStats', () => {
         recordDrawStats(map, map.get('B'), 2, [['A', 2]]);
         expect(map.get('A').HandForced).toBe(2);
         expect(map.get('A').MatchForced).toBe(12);
+    });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// clearQunoCallOnDraw
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('clearQunoCallOnDraw', () => {
+    test('a player who had called Quno no longer counts as having called after drawing', () => {
+        const p = makePlayer('A', 0, [buildCard(5)], { HasCalledUno: true });
+        clearQunoCallOnDraw(p);
+        expect(p.HasCalledUno).toBe(false);
+    });
+
+    test('a player who had not called stays not called', () => {
+        const p = makePlayer('A', 0);
+        clearQunoCallOnDraw(p);
+        expect(p.HasCalledUno).toBe(false);
+    });
+
+    test('does not touch the hand or other call state', () => {
+        const hand = [buildCard(5)];
+        const p = makePlayer('A', 0, hand, { HasCalledUno: true, HasCalledUnoMeThisTurn: true, LastUnoYouTime: 123 });
+        clearQunoCallOnDraw(p);
+        expect(p.Hand).toBe(hand);
+        expect(p.HasCalledUnoMeThisTurn).toBe(true);
+        expect(p.LastUnoYouTime).toBe(123);
     });
 });

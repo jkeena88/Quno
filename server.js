@@ -1027,6 +1027,8 @@ function autoDraw(SocketID) {
     const player = players.get(SocketID);
     if (!player) return Promise.resolve(true);
 
+    // Black cards count as playable here, Draw 4 included: a Draw 4 is legal whenever nothing else is
+    // playable (or the option allows it any time), so this agrees with the rules in playCard
     const playableNow = () => canPlayHand(player.Hand, currentColor, currentType, ['none']);
 
     return new Promise((resolve) => {

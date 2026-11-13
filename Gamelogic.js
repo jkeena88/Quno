@@ -227,9 +227,18 @@ function computeHandMargin(usableW, cardCount, cssCardW = 107, scale = 0.6, minM
     return Math.max(maxMargin, Math.min(minMargin, fitMargin));
 }
 
+// ── clearQunoCallOnDraw ───────────────────────────────────────────────────────
+// A player's Quno call only covers the hand they had when they made it. Whenever
+// their hand grows (a penalty, a stack payout, a search draw), the call is void.
+// Mutates the player in-place.
+
+function clearQunoCallOnDraw(player) {
+    player.HasCalledUno = false;
+}
+
 module.exports = {
     cardColor, cardType, cardValue, buildCard,
     createDeck, shuffle,
     canPlay, getPoints, nextPlayerID, reshuffleSeats,
-    buildRequiredPlay, computeHandMargin, recordDrawStats,
+    buildRequiredPlay, computeHandMargin, recordDrawStats, clearQunoCallOnDraw,
 };
