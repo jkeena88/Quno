@@ -91,6 +91,7 @@ socket.on('connect', function() {
 // Rebuild the full game state when rejoining after a disconnect
 socket.on('rejoinState', function(state) {
     socketId = state.mySocketId;
+    matchEverStarted = true;
     gameInProgress = !state.gameIsOver;
     isPlayerA = state.isHost;
     setOptionsEditable(isPlayerA);
@@ -281,7 +282,7 @@ function refreshWaitingText() {
 
 // Show or hide the waiting overlay for non-host players
 function updateWaitingOverlay() {
-    if (gameInProgress) return;
+    if (gameInProgress || matchEverStarted) return; // only before the first match; between hands there's nothing to wait for
 
     const overlay = document.getElementById('waitingOverlay');
     if (!isPlayerA) {
@@ -2065,9 +2066,14 @@ function closeHandSummary() {
 // Wire up the "Matt Mode" master checkbox to toggle all sub-options at once
 const masterCheckbox = document.getElementById('masterCheckbox');
 const controlledCheckboxes = document.querySelectorAll('.controlledCheckbox');
-masterCheckbox.addEventListener('click', () => {
-    const isChecked = masterCheckbox.checked;
-    controlledCheckboxes.forEach(checkbox => { checkbox.checked = isChecked; });
+masterCheckbox.addEventListener('change', () => {
+    controlledCheckboxes.forEach(checkbox => { checkbox.checked = masterCheckbox.checked; });
+});
+// ...and keep the master in step when individual options are toggled
+controlledCheckboxes.forEach(checkbox => {
+    checkbox.addEventListener('change', () => {
+        masterCheckbox.checked = Array.from(controlledCheckboxes).every(cb => cb.checked);
+    });
 });
 
 // ── Header popovers (name, sound) ──
