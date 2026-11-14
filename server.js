@@ -10,7 +10,7 @@ const crypto = require('crypto');
 
 const {
     buildCard, createDeck: buildDeck, shuffle,
-    canPlay: canPlayHand, getPoints, nextPlayerID, reshuffleSeats: reshuffleSeatsMap, recordDrawStats,
+    canPlay: canPlayHand, getPoints, nextPlayerID, reshuffleSeats: reshuffleSeatsMap, recordDrawStats, clearQunoCallOnDraw,
 } = require('./Gamelogic');
 
 app.use(express.static(__dirname + '/public', { 'Content-Type': 'application/javascript' }));
@@ -996,6 +996,7 @@ function drawCards(SocketID, requested, { paysStack = false, forcedBy = [], self
         logEvent(`${player.Name} had no cards left to draw`, 'draw', [player.Name]);
         return Promise.resolve();
     }
+    clearQunoCallOnDraw(player);
 
     const label = num === 1 ? ' card' : ' cards';
     logEvent(`${player.Name} drew ${num}${label}`, 'draw', [player.Name]);
@@ -1075,6 +1076,11 @@ function drawIfStuck(SocketID) {
     });
 }
 
+// Everyone's score and points given up, so clients can rank players (ties are broken by net points)
+function emitScores() {
+    io.emit('scores', Array.from(players.values()).map(p => ({ PlayerID: p.PlayerID, Name: p.Name, Points: p.Points, PointsGivenUp: p.PointsGivenUp })));
+}
+
 // What the table needs to highlight the winner and show who gave up how many points
 function handResultPayload(summary) {
     return { winner: summary.winner, points: summary.pointsThisHand, breakdown: summary.breakdown };
@@ -1089,6 +1095,7 @@ function checkForWin(SocketID) {
 
         const summary = getPoints(players, winner);
         io.emit('updateScore', winner.PlayerID, winner.Points, winner.HandsWon);
+        emitScores();
 
         summary.winner = winner.Name;
         summary.handDuration = (Date.now() - handStartTime) / 1000;
@@ -1455,6 +1462,7 @@ function runAdminAction(type, p) {
             if (!Number.isFinite(value)) return fail('Enter a number');
             pl[field] = Math.max(0, p.mode === 'add' ? pl[field] + value : value);
             io.emit('updateScore', pl.PlayerID, pl.Points, pl.HandsWon);
+            emitScores();
             logEvent(`${pl.Name}'s ${label} changed to ${pl[field]} (admin)`, 'room', [pl.Name]);
             return ok(`${pl.Name} now has ${pl[field]} ${label}`);
         }
