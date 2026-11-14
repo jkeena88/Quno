@@ -402,18 +402,23 @@ document.getElementById('scoreboard').addEventListener('keydown', e => {
 
 function setScores(playerList) {
     scores.clear();
-    playerList.forEach(p => scores.set(p.PlayerID, { name: p.Name, points: p.Points }));
+    // net (points scored minus points given up) isn't shown, but breaks ties in points
+    playerList.forEach(p => scores.set(p.PlayerID, { name: p.Name, points: p.Points, net: p.Points - (p.PointsGivenUp || 0) }));
     renderScoreboard();
 }
 
-// Medal for whoever has the most points, poop for whoever has the fewest.
-// Tied players share it, and nobody gets one when everyone is tied.
-function scoreBadge(points, allPoints) {
-    const max = Math.max(...allPoints);
-    const min = Math.min(...allPoints);
-    if (max === min) return '';
-    if (points === max) return '🥇';
-    if (points === min) return '💩';
+// Players are ranked by points, then by net points (scored minus given up).
+// Only players equal on both are really tied.
+const byPointsThenNet = (a, b) => (b.points - a.points) || (b.net - a.net);
+
+// Medal for whoever is first, poop for whoever is last. Tied players share it,
+// and nobody gets one when everyone is tied.
+function scoreBadge(me, all) {
+    const sorted = all.slice().sort(byPointsThenNet);
+    const best = sorted[0], worst = sorted[sorted.length - 1];
+    if (byPointsThenNet(best, worst) === 0) return '';
+    if (byPointsThenNet(me, best) === 0) return '🥇';
+    if (byPointsThenNet(me, worst) === 0) return '💩';
     return '';
 }
 
@@ -421,13 +426,13 @@ function renderScoreboard() {
     const box = document.getElementById('scoreboard');
     const rows = document.getElementById('scoreboard-rows');
     const list = Array.from(scores.values())
-        .sort((a, b) => (b.points - a.points) || a.name.localeCompare(b.name));
+        .sort((a, b) => byPointsThenNet(a, b) || a.name.localeCompare(b.name));
 
     box.classList.toggle('has-scores', list.length > 0);
     rows.textContent = '';
 
     list.forEach(p => {
-        const rank = list.findIndex(q => q.points === p.points) + 1; // tied players share a rank
+        const rank = list.findIndex(q => byPointsThenNet(q, p) === 0) + 1; // only players tied on points and net share a rank
         const row = document.createElement('div');
         row.className = 'score-row' + (p.name === playerName ? ' own' : '') + (rank === 1 && p.points > 0 ? ' leader' : '');
 
@@ -443,7 +448,7 @@ function renderScoreboard() {
         pointsEl.className = 'score-points';
         pointsEl.textContent = p.points;
 
-        const badge = scoreBadge(p.points, list.map(q => q.points));
+        const badge = scoreBadge(p, list);
         if (badge) {
             const badgeEl = document.createElement('span');
             badgeEl.className = 'score-badge';
@@ -636,6 +641,9 @@ socket.on('qunoCall', function({ playerId: callerId, kind, result, targets }) {
     panel.appendChild(bubble);
     bubble.addEventListener('animationend', () => bubble.remove());
 });
+
+// Everyone's score and points given up (sent whenever scores change), so the ranking can use net points
+socket.on('scores', setScores);
 
 socket.on('updateScore', function(player, points, handsWon) {
     document.getElementById('points_' + player).innerHTML = 'Points: ' + points;
@@ -1840,9 +1848,17 @@ socket.on('booted', () => {
 // ── End-of-hand summary modal ──
 
 // Sort helpers for the summary tables. Kept as plain functions so the tests can mirror them.
-const byTimeThenCards = (cardsKey, timeKey) => (a, b) => (a[timeKey] - b[timeKey]) || (b[cardsKey] - a[cardsKey]);
-const byCardsDrawn = (forcedKey, receivedKey, searchedKey, selfKey) => (a, b) =>
-    ((b[receivedKey] + b[searchedKey] + b[selfKey]) - (a[receivedKey] + a[searchedKey] + a[selfKey])) || (b[forcedKey] - a[forcedKey]);
+// Time spent: longest average time per card first (players with no cards played last), then most total time
+const byAvgTimeThenTotal = (cardsKey, timeKey) => {
+    const avg = p => p[cardsKey] > 0 ? p[timeKey] / p[cardsKey] : -1;
+    return (a, b) => (avg(b) - avg(a)) || (b[timeKey] - a[timeKey]);
+};
+// Cards drawn: most drawn in total (received + searched + self-owned) first, then fewest forced on
+// others, then most received, then most searched
+const byCardsDrawn = (forcedKey, receivedKey, searchedKey, selfKey) => {
+    const total = p => p[receivedKey] + p[searchedKey] + p[selfKey];
+    return (a, b) => (total(b) - total(a)) || (a[forcedKey] - b[forcedKey]) || (b[receivedKey] - a[receivedKey]) || (b[searchedKey] - a[searchedKey]);
+};
 
 function renderHandSummary(summary, isReview) {
     const handLabel = isReview ? 'Last hand' : 'This hand';
@@ -1875,7 +1891,7 @@ function renderHandSummary(summary, isReview) {
         const slowest = Math.max(...avgs);
         const ranked = avgs.length >= 2 && fastest !== slowest;
 
-        return ps.slice().sort(byTimeThenCards(cardsKey, timeKey)).map(p => {
+        return ps.slice().sort(byAvgTimeThenTotal(cardsKey, timeKey)).map(p => {
             const a = avg(p);
             let badge = '';
             if (ranked && a !== null) {
@@ -1893,7 +1909,7 @@ function renderHandSummary(summary, isReview) {
     const handTurnRows = buildTurnRows('handCardsPlayed', 'handTurnTime');
     const matchTurnRows = buildTurnRows('matchCardsPlayed', 'matchTurnTime');
 
-    const scoredAll = ps.map(p => p.pointsScored);
+    const standings = ps.map(p => ({ points: p.pointsScored, net: p.netPoints }));
     const standingRows = ps
         .slice()
         .sort((a, b) => (b.pointsScored - a.pointsScored) || (b.netPoints - a.netPoints))
@@ -1901,7 +1917,7 @@ function renderHandSummary(summary, isReview) {
             const netColor = p.netPoints >= 0 ? 'color:#3db87a;font-weight:600;' : 'color:#c94f5f;font-weight:600;';
             const netStr = (p.netPoints >= 0 ? '+' : '') + p.netPoints;
             return `<tr${rowClass(p.name)}>
-                <td style="${tdStyle}font-weight:600;">${truncate(p.name)} ${scoreBadge(p.pointsScored, scoredAll)}</td>
+                <td style="${tdStyle}font-weight:600;">${truncate(p.name)} ${scoreBadge({ points: p.pointsScored, net: p.netPoints }, standings)}</td>
                 <td style="${tdRight}">${p.pointsScored}</td>
                 <td style="${tdRight}">${p.pointsGivenUp}</td>
                 <td style="${tdRight}${netColor}">${netStr}</td>

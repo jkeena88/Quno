@@ -980,33 +980,60 @@ describe('getPoints — cards drawn stats', () => {
 // Summary table sorting  (mirrors the comparators in main.js)
 // ─────────────────────────────────────────────────────────────────────────────
 
-const byTimeThenCards = (cardsKey, timeKey) => (a, b) => (a[timeKey] - b[timeKey]) || (b[cardsKey] - a[cardsKey]);
-const byCardsDrawn = (forcedKey, receivedKey, searchedKey, selfKey) => (a, b) =>
-    ((b[receivedKey] + b[searchedKey] + b[selfKey]) - (a[receivedKey] + a[searchedKey] + a[selfKey])) || (b[forcedKey] - a[forcedKey]);
+const byAvgTimeThenTotal = (cardsKey, timeKey) => {
+    const avg = p => p[cardsKey] > 0 ? p[timeKey] / p[cardsKey] : -1;
+    return (a, b) => (avg(b) - avg(a)) || (b[timeKey] - a[timeKey]);
+};
+const byCardsDrawn = (forcedKey, receivedKey, searchedKey, selfKey) => {
+    const total = p => p[receivedKey] + p[searchedKey] + p[selfKey];
+    return (a, b) => (total(b) - total(a)) || (a[forcedKey] - b[forcedKey]) || (b[receivedKey] - a[receivedKey]) || (b[searchedKey] - a[searchedKey]);
+};
+const byPointsThenNet = (a, b) => (b.points - a.points) || (b.net - a.net);
+function scoreBadge(me, all) {
+    const sorted = all.slice().sort(byPointsThenNet);
+    const best = sorted[0], worst = sorted[sorted.length - 1];
+    if (byPointsThenNet(best, worst) === 0) return '';
+    if (byPointsThenNet(me, best) === 0) return '🥇';
+    if (byPointsThenNet(me, worst) === 0) return '💩';
+    return '';
+}
 
 describe('summary table sorting', () => {
-    test('time spent: lowest time first, ties broken by most cards', () => {
+    test('time spent: longest average time per card first, ties broken by most total time', () => {
         const rows = [
-            { name: 'A', handCardsPlayed: 5,  handTurnTime: 60 },
-            { name: 'B', handCardsPlayed: 9,  handTurnTime: 30 },
-            { name: 'C', handCardsPlayed: 12, handTurnTime: 60 },
+            { name: 'A', handCardsPlayed: 5,  handTurnTime: 50 },  // 10s each
+            { name: 'B', handCardsPlayed: 2,  handTurnTime: 30 },  // 15s each
+            { name: 'C', handCardsPlayed: 10, handTurnTime: 100 }, // 10s each, more total than A
+            { name: 'D', handCardsPlayed: 0,  handTurnTime: 20 },  // no cards played: last
         ];
-        const sorted = rows.slice().sort(byTimeThenCards('handCardsPlayed', 'handTurnTime')).map(r => r.name);
-        expect(sorted).toEqual(['B', 'C', 'A']);
+        const sorted = rows.slice().sort(byAvgTimeThenTotal('handCardsPlayed', 'handTurnTime')).map(r => r.name);
+        expect(sorted).toEqual(['B', 'C', 'A', 'D']);
     });
 
-    test('cards drawn: most received + searched + self-owned first, ties broken by most forced', () => {
+    test('time spent: players with no cards played are ordered by total time', () => {
         const rows = [
-            { name: 'A', handForced: 1, handReceived: 2, handSearched: 3, handSelfOwned: 0 }, // 5
-            { name: 'B', handForced: 4, handReceived: 4, handSearched: 2, handSelfOwned: 0 }, // 6
-            { name: 'C', handForced: 9, handReceived: 5, handSearched: 0, handSelfOwned: 0 }, // 5
+            { name: 'A', handCardsPlayed: 0, handTurnTime: 5 },
+            { name: 'B', handCardsPlayed: 0, handTurnTime: 25 },
+        ];
+        const sorted = rows.slice().sort(byAvgTimeThenTotal('handCardsPlayed', 'handTurnTime')).map(r => r.name);
+        expect(sorted).toEqual(['B', 'A']);
+    });
+
+    test('cards drawn: most drawn in total first, then fewest forced, then most received, then most searched', () => {
+        const rows = [
+            { name: 'A', handForced: 3, handReceived: 2, handSearched: 3, handSelfOwned: 0 }, // 5, forced 3
+            { name: 'B', handForced: 1, handReceived: 4, handSearched: 2, handSelfOwned: 0 }, // 6
+            { name: 'C', handForced: 1, handReceived: 5, handSearched: 0, handSelfOwned: 0 }, // 5, forced 1, received 5
             { name: 'D', handForced: 0, handReceived: 1, handSearched: 1, handSelfOwned: 5 }, // 7
+            { name: 'E', handForced: 1, handReceived: 3, handSearched: 2, handSelfOwned: 0 }, // 5, forced 1, received 3
+            { name: 'F', handForced: 1, handReceived: 3, handSearched: 2, handSelfOwned: 0 }, // identical to E except name
+            { name: 'G', handForced: 1, handReceived: 3, handSearched: 1, handSelfOwned: 1 }, // 5, forced 1, received 3, searched 1
         ];
         const sorted = rows.slice().sort(byCardsDrawn('handForced', 'handReceived', 'handSearched', 'handSelfOwned')).map(r => r.name);
-        expect(sorted).toEqual(['D', 'B', 'C', 'A']);
+        expect(sorted).toEqual(['D', 'B', 'C', 'E', 'F', 'G', 'A']);
     });
 
-    test('forced alone does not affect the primary order', () => {
+    test('cards drawn: forced alone does not affect the primary order', () => {
         const rows = [
             { name: 'A', matchForced: 50, matchReceived: 1, matchSearched: 1, matchSelfOwned: 0 },
             { name: 'B', matchForced: 0,  matchReceived: 2, matchSearched: 1, matchSelfOwned: 0 },
@@ -1016,6 +1043,50 @@ describe('summary table sorting', () => {
     });
 });
 
+describe('scoreboard ranking', () => {
+    test('equal points are broken by net points', () => {
+        const rows = [
+            { name: 'A', points: 40, net: -5 },
+            { name: 'B', points: 40, net: 12 },
+            { name: 'C', points: 60, net: 0 },
+        ];
+        expect(rows.slice().sort(byPointsThenNet).map(r => r.name)).toEqual(['C', 'B', 'A']);
+    });
+
+    test('only players equal on points and net are really tied', () => {
+        const rows = [
+            { name: 'A', points: 40, net: 5 },
+            { name: 'B', points: 40, net: 5 },
+            { name: 'C', points: 40, net: -2 },
+        ];
+        expect(byPointsThenNet(rows[0], rows[1])).toBe(0);
+        expect(byPointsThenNet(rows[0], rows[2])).toBeLessThan(0);
+    });
+
+    test('medal and poop go to the first and last, sharing only true ties', () => {
+        const rows = [
+            { name: 'A', points: 40, net: 12 },
+            { name: 'B', points: 40, net: 5 },
+            { name: 'C', points: 40, net: 5 },
+            { name: 'D', points: 10, net: -30 },
+        ];
+        expect(rows.map(r => scoreBadge(r, rows))).toEqual(['🥇', '', '', '💩']);
+    });
+
+    test('a tie for last on points and net shares the poop', () => {
+        const rows = [
+            { name: 'A', points: 40, net: 12 },
+            { name: 'B', points: 10, net: -3 },
+            { name: 'C', points: 10, net: -3 },
+        ];
+        expect(rows.map(r => scoreBadge(r, rows))).toEqual(['🥇', '💩', '💩']);
+    });
+
+    test('nobody gets a badge when everyone is tied', () => {
+        const rows = [{ name: 'A', points: 0, net: 0 }, { name: 'B', points: 0, net: 0 }];
+        expect(rows.map(r => scoreBadge(r, rows))).toEqual(['', '']);
+    });
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // recordDrawStats
