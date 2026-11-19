@@ -337,6 +337,7 @@ socket.on('chooseColor', function() {
 socket.on('colorChosen', function(color) {
     currentColor = color;
     applyWildOverlay(color);
+    hide('color-buttons');
 });
 
 socket.on('hideColor', function() {
@@ -1401,8 +1402,13 @@ function updatePlayableCards(topCard, currentColor) {
         const cardColor = card.getAttribute('dataCardColor');
         const cardType = card.getAttribute('dataCardType');
 
-        if (!mustPlaySpecific && cardType !== 'draw4') {
-            if (cardColor === currentColor || cardType === topCard.Type || cardColor === 'black') {
+        if (cardType !== 'draw4') {
+            if (mustPlaySpecific) {
+                // During a stack the only other options are the required types (a skip or reverse)
+                if (requiredPlay.includes(cardType) && (cardColor === currentColor || cardType === topCard.Type)) {
+                    hasOtherPlayable = true;
+                }
+            } else if (cardColor === currentColor || cardType === topCard.Type || cardColor === 'black') {
                 hasOtherPlayable = true;
             }
         }
@@ -1423,6 +1429,7 @@ function updatePlayableCards(topCard, currentColor) {
                     playable = true;
                 }
             }
+            if (cardType === 'draw4' && !playWildDraw4Enabled && hasOtherPlayable) playable = false;
         } else {
             if (cardColor === currentColor) playable = true;
             if (cardType === topCard.Type) playable = true;

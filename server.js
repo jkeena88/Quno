@@ -45,6 +45,7 @@ let deck = [];
 let playerA = null;      // socket ID of the host
 let gameIsOver = false;
 let pendingWinnerSocketId = null; // deferred win check — set when a player empties their hand on a draw card
+const latestDisconnect = new Map(); // player name → socket ID of their latest disconnect, so an older grace timer knows it was superseded
 
 // ── Per-hand / per-match stats ──
 let matchStartTime = null;
@@ -99,6 +100,7 @@ function onConnection(socket) {
 
         const disconnectedName = socket.playerName;
         const disconnectedId = socket.id;
+        if (disconnectedName) latestDisconnect.set(disconnectedName, disconnectedId);
 
         recordEvent(`${disconnectedName || 'A visitor'} disconnected`);
 
@@ -118,6 +120,10 @@ function onConnection(socket) {
             // A host whose page was refreshed by the admin never came back: hand the role on now
             if (disconnectedId === playerA) promoteNextHost(disconnectedId);
 
+            // They came back and dropped again since this timer started; the newer disconnect has its own timer
+            if (disconnectedName && latestDisconnect.get(disconnectedName) !== disconnectedId) return;
+            if (disconnectedName) latestDisconnect.delete(disconnectedName);
+
             // The player rejoined successfully if their old socket ID was replaced in the
             // map (disconnectedAt cleared) or if the old entry is simply gone (new socket
             // took over). If the entry still has a disconnectedAt stamp it means nobody
@@ -131,15 +137,20 @@ function onConnection(socket) {
                 playersInLobby = playersInLobby.filter(p => p !== disconnectedName);
                 pendingPlayers = pendingPlayers.filter(id => id !== disconnectedId);
                 const leavingPlayerId = entry ? entry.PlayerID : -1;
+
+                // If it was their turn, move on while they're still in `players`:
+                // nextTurn looks up the current player's seat to work out who is next
+                if (entry && disconnectedId === currentPlayer && !gameIsOver) {
+                    settleUnchosenColor(entry);
+                    nextTurn();
+                }
+
                 returnHandToDiscard(entry);
                 players.delete(disconnectedId);
                 io.emit('playerLeft', { playerName: disconnectedName, playerId: leavingPlayerId });
                 io.emit('newPlayer', { players: playersInLobby, host: hostName });
                 logEvent(disconnectedName + ' left the game', 'room', [disconnectedName]);
 
-                if (disconnectedId === currentPlayer && !gameIsOver) {
-                    nextTurn();
-                }
                 if (players.size === 0) promoteWaiting(); // no match yet: seat the next person right away
             }
         }, REJOIN_GRACE_MS);
@@ -147,6 +158,7 @@ function onConnection(socket) {
 
     // Handle a player joining or rejoining the lobby
     socket.on('requestJoin', function(playerName) {
+        if (typeof playerName !== 'string') return;
         playerName = playerName.substring(0, 29);
         socket.playerName = playerName;
 
@@ -175,6 +187,8 @@ function onConnection(socket) {
                 if (oldSocketId === playerA) {
                     playerA = socket.id;
                 }
+                if (pendingWinnerSocketId === oldSocketId) pendingWinnerSocketId = socket.id;
+                if (pendingSkipTarget === oldSocketId) pendingSkipTarget = socket.id;
                 break;
             }
         }
@@ -216,6 +230,10 @@ function onConnection(socket) {
                 io.to(socket.id).emit('isPlayerA', { gameInProgress: !gameIsOver });
                 io.emit('setHost', hostName);
             }
+            // Everyone dropped and the host role was left empty: the first person back takes it
+            if (playerA === null) assignHost(socket);
+            // They dropped while picking a wild color: show the picker again
+            if (rejoiningPlayer.WaitingForColorChoice && !gameIsOver) io.to(socket.id).emit('chooseColor');
             return;
         }
 
@@ -270,7 +288,14 @@ function onConnection(socket) {
     socket.on('playCard', async function(card) {
         let player = players.get(socket.id);
         if (!player) return;
+        if (!card || typeof card !== 'object') return;
         if (player.WaitingForColorChoice) return; // don't process further input while color picker is open
+
+        // The client only says which card by ID; everything else comes from the server's own copy,
+        // and the player has to actually be holding it
+        const held = player.Hand.find(c => c.ID === card.ID);
+        if (!held) return;
+        card = held;
 
         let playColor = card.Color;
         let playType = card.Type;
@@ -286,8 +311,12 @@ function onConnection(socket) {
             if(playWildDraw4) {
                 draw4wild = (playType == 'draw4');
             } else {
-                // Wild Draw 4 is only legal if the player has no other playable card
-                draw4wild = (playType == 'draw4' && !canPlay(currentPlayer, ['draw4']));
+                // Wild Draw 4 is only legal if it's the player's only option. During a stack the other
+                // options are the card types requiredPlay allows (a matching skip or reverse).
+                const otherOptions = requiredPlay.length > 0
+                    ? cardList.filter(t => !requiredPlay.includes(t) || t === 'draw4')
+                    : ['draw4'];
+                draw4wild = (playType == 'draw4' && !canPlay(currentPlayer, otherOptions));
             }
 
             // Play is legal if it matches color/type/wild, and satisfies any stacking requirement
@@ -503,6 +532,7 @@ function onConnection(socket) {
     // Save updated game options sent by the host
     socket.on('saveOptions', (data) => {
         if (socket.id !== playerA) return; // host only
+        if (!data || !Array.isArray(data.options)) return;
         applyOptions(data.options, socket.playerName);
     });
 
@@ -701,6 +731,7 @@ function bootPlayerByName(targetName) {
 
         // If it's the booted player's turn, advance BEFORE removing them
         if (wasCurrentPlayer && players.size > 2) {
+            settleUnchosenColor(targetPlayerEntry);
             nextTurn();
         }
 
@@ -1089,6 +1120,7 @@ function handResultPayload(summary) {
 // Check if the given player has won (empty hand), and end the hand/match if so
 function checkForWin(SocketID) {
     let player = players.get(SocketID);
+    if (!player) return; // they left before a deferred win could be checked
 
     if(player.Hand.length === 0) {
         let winner = players.get(SocketID);
@@ -1140,6 +1172,16 @@ function discardCard(card, SocketID) {
     emitPileStatus();
 }
 
+// If the player whose turn it was is removed or skipped while still choosing a wild color,
+// the color stays what it was before the wild. Tell everyone so every table agrees and the
+// wild is shown with that color over it.
+function settleUnchosenColor(player) {
+    if (!player || !player.WaitingForColorChoice) return;
+    player.WaitingForColorChoice = false;
+    io.emit('colorChosen', currentColor);
+    logEvent([player.Name, ' never chose a color, so it stays ', colorPart(currentColor)], 'play', [player.Name]);
+}
+
 // Clear the required-play list and stack state, and broadcast the update to all clients
 function clearRequiredPlay() {
     requiredPlay = [];
@@ -1161,7 +1203,10 @@ async function nextTurn(skipAutoDraw = false) {
     if (gameIsOver) return;
     let player = players.get(currentPlayer);
 
-    const nextID = nextPlayerID(player.PlayerID, playDirection, players.size);
+    // Seat IDs can have gaps after someone leaves mid-hand, so step through the seats
+    // that actually exist (in ID order) rather than through raw ID numbers
+    const seats = Array.from(players.values()).map(p => p.PlayerID).sort((a, b) => a - b);
+    const nextID = seats[nextPlayerID(seats.indexOf(player.PlayerID), playDirection, seats.length)];
 
     players.forEach((nextPlayer) => {
         if(nextPlayer.PlayerID == nextID) {
@@ -1519,7 +1564,7 @@ function runAdminAction(type, p) {
             cardsToDraw = 0;
             stackContributions.clear();
             pendingSkipTarget = null;
-            players.forEach(pl => { pl.WaitingForColorChoice = false; });
+            players.forEach(pl => settleUnchosenColor(pl));
             emitGameStatus();
             nextTurn(); // also clears requiredPlay and stackType
             logEvent('The admin skipped to the next turn', 'room', []);
