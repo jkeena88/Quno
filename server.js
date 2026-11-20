@@ -280,10 +280,17 @@ function onConnection(socket) {
     });
 
     // Start a new match (resets scores and seats)
-    socket.on('resetGame', () => startNewMatch());
+    socket.on('resetGame', () => {
+        if (socket.id !== playerA) return; // host only
+        startNewMatch();
+    });
 
     // Deal a new hand without resetting scores
-    socket.on('newHand', () => dealNewHand());
+    socket.on('newHand', () => {
+        if (socket.id !== playerA) return; // host only
+        if (players.size < 2) return;      // no match to deal into yet
+        dealNewHand();
+    });
 
     socket.on('playCard', async function(card) {
         let player = players.get(socket.id);
@@ -1164,7 +1171,7 @@ function discardCard(card, SocketID) {
     discardPile.push(card);
     if (card.Color !== 'black') currentColor = card.Color;
     currentType = card.Type;
-    io.emit('discardCard', card, player);
+    io.emit('discardCard', card, player && { SocketID: player.SocketID, PlayerID: player.PlayerID });
 
     if (SocketID !== -1) {
         io.emit('removeOpponentCard', player.PlayerID);
