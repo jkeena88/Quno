@@ -1884,6 +1884,19 @@ socket.on('booted', () => {
     `;
 });
 
+// The same browser opened the game in another tab: that tab is the live one now
+socket.on('replaced', () => {
+    socket.io.opts.reconnection = false;
+    socket.disconnect();
+
+    document.body.innerHTML = `
+        <div style="text-align:center; margin-top:100px; width:100%;">
+            <h1>Quno is open in another tab or window.</h1>
+            <p>That page has taken over your seat. Refresh this page to take it back here.</p>
+        </div>
+    `;
+});
+
 // ── End-of-hand summary modal ──
 
 // Sort helpers for the summary tables. Kept as plain functions so the tests can mirror them.
