@@ -46,6 +46,7 @@ let playerA = null;      // socket ID of the host
 let gameIsOver = false;
 let pendingWinnerSocketId = null; // deferred win check — set when a player empties their hand on a draw card
 const latestDisconnect = new Map(); // player name → socket ID of their latest disconnect, so an older grace timer knows it was superseded
+const playerTokens = new WeakMap(); // player object → secret of the browser that owns it (never sent to clients)
 
 // ── Per-hand / per-match stats ──
 let matchStartTime = null;
@@ -157,9 +158,17 @@ function onConnection(socket) {
     });
 
     // Handle a player joining or rejoining the lobby
-    socket.on('requestJoin', function(playerName) {
+    socket.on('requestJoin', function(playerName, clientId) {
         if (typeof playerName !== 'string') return;
+        if (typeof clientId !== 'string' || clientId.length < 8 || clientId.length > 64) return;
         playerName = playerName.substring(0, 29);
+
+        // A name belongs to the browser using it; a different browser can't take it over
+        if (nameHeldByOther(playerName, clientId, socket)) {
+            socket.emit('joinRejected', '"' + playerName + '" is already in use by someone else.');
+            return;
+        }
+        socket.clientId = clientId;
         socket.playerName = playerName;
 
         // Check if this is a player rejoining with a new socket after disconnecting
@@ -433,6 +442,8 @@ function onConnection(socket) {
     socket.on('colorChosen', async function(color) {
         let player = players.get(socket.id);
         if (!player) return;
+        if (!player.WaitingForColorChoice) return;                       // only the player who just played a wild
+        if (!['red', 'yellow', 'green', 'blue'].includes(color)) return; // and only a real color
 
         player.WaitingForColorChoice = false;
 
@@ -626,6 +637,15 @@ function promoteNextHost(excludeId) {
     if (next) assignHost(next);
 }
 
+// True if a different browser (a different secret) already holds this name, either seated
+// in the game or connected right now
+function nameHeldByOther(name, clientId, socket) {
+    const seated = Array.from(players.values()).some(p => p.Name === name && playerTokens.get(p) !== clientId);
+    const connected = Array.from(io.sockets.sockets.values())
+        .some(s => s !== socket && s.playerName === name && s.clientId !== clientId);
+    return seated || connected;
+}
+
 // Connected people who hold a seat in the lobby (everyone except those waiting for room)
 function lobbySockets() {
     return Array.from(io.sockets.sockets.values())
@@ -706,6 +726,7 @@ function dealNewHand() {
                 WaitingForColorChoice: false
             };
             players.set(pendingSocketId, player);
+            playerTokens.set(player, pendingSocket.clientId);
             logEvent(pendingSocket.playerName + ' joined the game', 'room', [pendingSocket.playerName]);
         });
         pendingPlayers = [];
@@ -842,6 +863,7 @@ function createPlayers() {
             WaitingForColorChoice: false
         };
         players.set(socket.id, player);
+        playerTokens.set(player, socket.clientId);
     });
 }
 
@@ -1318,9 +1340,19 @@ function passwordMatches(supplied) {
 
 const denied = msg => { const e = new Error(msg); e.data = { auth: true }; return e; };
 
-adminNs.use((socket, next) => {
+// The address the connection really came from. Behind a proxy (Azure) the LAST X-Forwarded-For
+// entry is the one the proxy added; earlier entries can be written by the client, so they can't
+// be trusted. The port some proxies append is dropped, since it changes on every connection.
+function clientIp(socket) {
     const fwd = socket.handshake.headers['x-forwarded-for'];
-    const ip = fwd ? fwd.split(',')[0].trim() : socket.handshake.address;
+    if (!fwd) return socket.handshake.address;
+    const last = fwd.split(',').pop().trim();
+    return last.replace(/^\[(.*)\](:\d+)?$/, '$1').replace(/^(\d+\.\d+\.\d+\.\d+):\d+$/, '$1');
+}
+
+adminNs.use((socket, next) => {
+    console.log('admin xff:', socket.handshake.headers['x-forwarded-for'], '| address:', socket.handshake.address);
+    const ip = clientIp(socket);
     const rec = adminFailures.get(ip) || { count: 0, lockedUntil: 0 };
 
     if (Date.now() < rec.lockedUntil) return next(denied('Too many attempts. Try again in a minute.'));
