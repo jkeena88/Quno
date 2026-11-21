@@ -35,6 +35,9 @@ function hide(id) {
     document.getElementById(id).style.display = 'none';
 }
 
+// Escape text before it goes into innerHTML
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
 // Render the lobby player list, with host crown and boot-on-click for the host
 function renderPlayerList(lobbyPlayers, hostName) {
     const playerListDiv = document.getElementById('playerList');
@@ -46,7 +49,13 @@ function renderPlayerList(lobbyPlayers, hostName) {
         const span = document.createElement('span');
         span.style.marginRight = '10px';
         const isHost = (name === hostName);
-        span.innerHTML = isHost ? `<span class="crown">👑</span>${name}` : name;
+        if (isHost) {
+            const crown = document.createElement('span');
+            crown.className = 'crown';
+            crown.textContent = '👑';
+            span.appendChild(crown);
+        }
+        span.appendChild(document.createTextNode(name));
 
         if (isPlayerA) {
             if (name === playerName) {
@@ -85,7 +94,7 @@ if (loadSetting('quno-panel-collapsed') === 'true') {
 socket.on('connect', function() {
     socketId = socket.id;
     show('btnOptions', 'inline-block');
-    socket.emit('requestJoin', playerName);
+    socket.emit('requestJoin', playerName, clientId);
 });
 
 // Rebuild the full game state when rejoining after a disconnect
@@ -1041,7 +1050,7 @@ socket.on('optionsChanged', function({ changedBy, options, labels }) {
 
     el.innerHTML = `
         <div style="font-size:11.5px;margin-bottom:5px;" class="log-meta">
-            <strong class="log-name">${changedBy}</strong> updated options
+            <strong class="log-name">${esc(changedBy)}</strong> updated options
         </div>
         ${rows}
     `;
@@ -1531,6 +1540,18 @@ function saveSetting(key, value) {
     try { localStorage.setItem(key, value); } catch (e) {}
 }
 
+// A secret that identifies this browser, so nobody else can take our seat by typing your name
+const clientId = (function() {
+    let id = loadSetting('quno-client-id');
+    if (!id) {
+        id = (window.crypto && crypto.randomUUID)
+            ? crypto.randomUUID()
+            : Array.from({ length: 4 }, () => Math.random().toString(36).slice(2)).join('');
+        saveSetting('quno-client-id', id);
+    }
+    return id;
+})();
+
 // Renaming: the server checks the name is free, then tells us (and everyone else)
 function changeName() {
     const requested = document.getElementById('player-name').value.trim();
@@ -1550,6 +1571,17 @@ socket.on('nameAccepted', function(newName) {
 
 socket.on('nameRejected', function(message) {
     document.getElementById('name-msg').textContent = message;
+});
+
+// Someone else is using your name: pick another and try again
+socket.on('joinRejected', function(message) {
+    const fallback = 'Player' + Math.floor(1000 + Math.random() * 9000);
+    const entered = prompt(message + '\nEnter a different name:', fallback);
+    playerName = ((entered || '').trim() || fallback).substring(0, 29);
+    savePlayerName(playerName);
+    document.getElementById('player-name').value = playerName;
+    document.getElementById('header-name').textContent = playerName;
+    socket.emit('requestJoin', playerName, clientId);
 });
 
 // Someone (maybe us) renamed: update their name on the table
@@ -1636,7 +1668,7 @@ function createPlayersUI(players) {
         div_hand.className = 'hand';
         div_hand.id = 'hand_' + players[i].PlayerID;
 
-        div_player_name.innerHTML = players[i].Name;
+        div_player_name.textContent = players[i].Name;
         div_points.innerHTML = 'Points: ' + players[i].Points;
         div_hands_won.innerHTML = 'Hands Won: ' + players[i].HandsWon;
         div_player.appendChild(div_player_name);
@@ -1880,7 +1912,7 @@ function renderHandSummary(summary, isReview) {
     // Truncate long player names so they don't break table layout
     const MAX_NAME = 12;
     function truncate(name) {
-        return name.length > MAX_NAME ? name.slice(0, MAX_NAME - 1) + '...' : name;
+        return esc(name.length > MAX_NAME ? name.slice(0, MAX_NAME - 1) + '...' : name);
     }
 
     const thBase  = 'padding:7px 10px;font-size:11px;color:#6b8a7a;font-weight:700;text-transform:uppercase;letter-spacing:.07em;border-bottom:1px solid rgba(0,232,154,0.3);';
