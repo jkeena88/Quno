@@ -171,6 +171,19 @@ function onConnection(socket) {
         socket.clientId = clientId;
         socket.playerName = playerName;
 
+        // The same browser opened the game again (another tab): the newer page takes over
+        // and the older one is told to stand down
+        Array.from(io.sockets.sockets.values())
+            .filter(s => s !== socket && s.clientId === clientId && s.playerName === playerName)
+            .forEach(older => {
+                if (older.id === playerA) {
+                    playerA = socket.id; // the host role goes with the person, not the tab
+                    io.to(socket.id).emit('isPlayerA', { gameInProgress: !gameIsOver });
+                }
+                older.emit('replaced');
+                older.disconnect(true);
+            });
+
         // Check if this is a player rejoining with a new socket after disconnecting
         let rejoiningPlayer = null;
         for (let [oldSocketId, player] of players.entries()) {
@@ -1351,7 +1364,6 @@ function clientIp(socket) {
 }
 
 adminNs.use((socket, next) => {
-    console.log('admin xff:', socket.handshake.headers['x-forwarded-for'], '| address:', socket.handshake.address);
     const ip = clientIp(socket);
     const rec = adminFailures.get(ip) || { count: 0, lockedUntil: 0 };
 
