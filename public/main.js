@@ -264,7 +264,7 @@ socket.on('gameStarted', function(playerList) {
 socket.on('pendingJoin', function() {
     isPendingJoin = true;
     const overlay = document.getElementById('waitingOverlay');
-    overlay.textContent = 'A hand is in progress — you will join at the start of the next hand';
+    overlay.textContent = 'You will join at the start of the next hand';
     overlay.style.display = 'flex';
 });
 
@@ -2178,4 +2178,11 @@ setupPopover('name-popover', 'nameToggle', 'player-name');
 setupPopover('sound-popover', 'soundToggle', 'sound-volume');
 
 setOptionsEditable(false);
-init();
+
+// Chrome can load a page in the background while someone is still typing its address
+// (prerendering), running its scripts. Wait until the page is actually opened before joining.
+if (document.prerendering) {
+    document.addEventListener('prerenderingchange', init, { once: true });
+} else {
+    init();
+}

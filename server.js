@@ -44,7 +44,7 @@ let hostName = null;
 let deck = [];
 let playerA = null;      // socket ID of the host
 let gameIsOver = false;
-let pendingWinnerSocketId = null; // deferred win check — set when a player empties their hand on a draw card
+let pendingWinners = [];          // socket IDs of players who emptied their hand on a draw/skip/reverse card, in the order they did; the win is decided once the effect resolves
 const latestDisconnect = new Map(); // player name → socket ID of their latest disconnect, so an older grace timer knows it was superseded
 const playerTokens = new WeakMap(); // player object → secret of the browser that owns it (never sent to clients)
 
@@ -143,6 +143,7 @@ function onConnection(socket) {
                 // nextTurn looks up the current player's seat to work out who is next
                 if (entry && disconnectedId === currentPlayer && !gameIsOver) {
                     settleUnchosenColor(entry);
+                    dropPendingEffect();
                     nextTurn();
                 }
 
@@ -151,6 +152,13 @@ function onConnection(socket) {
                 io.emit('playerLeft', { playerName: disconnectedName, playerId: leavingPlayerId });
                 io.emit('newPlayer', { players: playersInLobby, host: hostName });
                 logEvent(disconnectedName + ' left the game', 'room', [disconnectedName]);
+
+                // End the hand if too few players remain to continue (as when the host boots someone)
+                if (players.size === 1 && !gameIsOver) {
+                    gameIsOver = true;
+                    io.emit('turnChange', -1);
+                    logEvent('Game over — not enough players to continue', 'room', []);
+                }
 
                 if (players.size === 0) promoteWaiting(); // no match yet: seat the next person right away
             }
@@ -209,7 +217,7 @@ function onConnection(socket) {
                 if (oldSocketId === playerA) {
                     playerA = socket.id;
                 }
-                if (pendingWinnerSocketId === oldSocketId) pendingWinnerSocketId = socket.id;
+                pendingWinners = pendingWinners.map(id => id === oldSocketId ? socket.id : id);
                 if (pendingSkipTarget === oldSocketId) pendingSkipTarget = socket.id;
                 break;
             }
@@ -291,9 +299,9 @@ function onConnection(socket) {
             logEvent(playerName + ' is now the host', 'room', [playerName]);
         }
 
-        // If a hand is currently in progress, hold this player in a pending queue
+        // If a hand is currently hand in progress or just finished, hold this player in a pending queue
         // rather than adding them to the active game — they'll join at the next hand.
-        if (!gameIsOver && players.size > 0) {
+        if (players.size > 0) {
             if (!pendingPlayers.includes(socket.id)) {
                 pendingPlayers.push(socket.id);
             }
@@ -378,9 +386,11 @@ function onConnection(socket) {
                 }
 
                 if(playType == 'wild') {
-                    player.WaitingForColorChoice = true;
-                    io.to(socket.id).emit('chooseColor');
-
+                    // If this was their last card the hand is already over: no color to choose
+                    if (!gameIsOver) {
+                        player.WaitingForColorChoice = true;
+                        io.to(socket.id).emit('chooseColor');
+                    }
                 } else if(playType == 'draw4') {
                     cardsToDraw += 4;
                     stackType = 'draw4';
@@ -395,18 +405,14 @@ function onConnection(socket) {
                     stackType = 'draw2';
                     stackContributions.set(player.Name, (stackContributions.get(player.Name) || 0) + 2);
                     emitGameStatus();
-                    if (players.get(socket.id).Hand.length === 0) {
-                        pendingWinnerSocketId = socket.id;
-                    }
+                    markPendingWin(socket.id);
                     await nextTurn(true);
                     await offerStack();
 
                 } else if(playType == 'skip' || (playType == 'reverse' && players.size == 2)) {
                     // With 2 players, Reverse always acts as a Skip.
                     // In both cases: the targeted player gets a chance to respond before being skipped.
-                    if (players.get(socket.id).Hand.length === 0) {
-                        pendingWinnerSocketId = socket.id;
-                    }
+                    markPendingWin(socket.id);
 
                     if (cardsToDraw > 0) {
                         // Mid-stack skip: the next player receives the draw queue (they are the one
@@ -421,9 +427,7 @@ function onConnection(socket) {
                     }
 
                 } else if(playType == 'reverse') {
-                    if (players.get(socket.id).Hand.length === 0) {
-                        pendingWinnerSocketId = socket.id;
-                    }
+                    markPendingWin(socket.id);
 
                     if (cardsToDraw > 0) {
                         playDirection = -playDirection;
@@ -466,9 +470,7 @@ function onConnection(socket) {
 
         if(cardsToDraw > 0) {
             // Wild Draw 4 was just played — advance and offer the stack
-            if (players.get(socket.id).Hand.length === 0) {
-                pendingWinnerSocketId = socket.id;
-            }
+            markPendingWin(socket.id);
             await nextTurn(true);
             await offerStack();
         } else {
@@ -773,6 +775,7 @@ function bootPlayerByName(targetName) {
         // If it's the booted player's turn, advance BEFORE removing them
         if (wasCurrentPlayer && players.size > 2) {
             settleUnchosenColor(targetPlayerEntry);
+            dropPendingEffect();
             nextTurn();
         }
 
@@ -1224,6 +1227,20 @@ function settleUnchosenColor(player) {
     logEvent([player.Name, ' never chose a color, so it stays ', colorPart(currentColor)], 'play', [player.Name]);
 }
 
+// The player whose turn it was is leaving or removed while an effect was waiting on them (a draw
+// stack aimed at them, or a Wild Draw 4 they played but never picked a color for). That effect is
+// dropped, because the cards would otherwise land on someone who did nothing to deserve them,
+// and any win that was waiting on it is decided now.
+function dropPendingEffect() {
+    if (cardsToDraw > 0) {
+        cardsToDraw = 0;
+        emitGameStatus();
+    }
+    stackContributions.clear();
+    pendingSkipTarget = null;
+    resolvePendingWin();
+}
+
 // Clear the required-play list and stack state, and broadcast the update to all clients
 function clearRequiredPlay() {
     requiredPlay = [];
@@ -1232,11 +1249,21 @@ function clearRequiredPlay() {
     io.emit('requiredPlay', requiredPlay);
 }
 
-// Resolve a win that was deferred while a draw card effect played out
+// A player who empties their hand on a draw/skip/reverse card doesn't win until the effect has
+// resolved. Players are queued in the order they reached 0 cards.
+function markPendingWin(socketId) {
+    const player = players.get(socketId);
+    if (player && player.Hand.length === 0 && !pendingWinners.includes(socketId)) pendingWinners.push(socketId);
+}
+
+// Once the effect has resolved, the first queued player who still has no cards wins.
+// Anyone who had to draw (or has left) is passed over; if nobody qualifies the hand goes on.
 function resolvePendingWin() {
-    if (pendingWinnerSocketId) {
-        checkForWin(pendingWinnerSocketId);
-        pendingWinnerSocketId = null;
+    const queue = pendingWinners;
+    pendingWinners = [];
+    for (const id of queue) {
+        checkForWin(id); // does nothing unless they still have no cards
+        if (gameIsOver) break;
     }
 }
 
@@ -1286,7 +1313,7 @@ async function startGame() {
     stackType = null;
     stackContributions.clear();
     pendingSkipTarget = null;
-    pendingWinnerSocketId = null;
+    pendingWinners = [];
     handStartTime = Date.now();
     handCardsPlayed = 0;
     discardPile = [];
@@ -1417,7 +1444,7 @@ function buildAdminState() {
             currentColor, currentType, playDirection, cardsToDraw, stackType,
             requiredPlay,
             pendingSkipTarget: nameOf(pendingSkipTarget),
-            pendingWinner: nameOf(pendingWinnerSocketId),
+            pendingWinner: pendingWinners.map(nameOf).filter(Boolean).join(', ') || null,
             deckCount: deck.length,
             discardCount: discardPile.length,
             topCard: discardPile.length ? discardPile[discardPile.length - 1] : null,
