@@ -299,7 +299,7 @@ function onConnection(socket) {
             logEvent(playerName + ' is now the host', 'room', [playerName]);
         }
 
-        // If a hand is currently hand in progress or just finished, hold this player in a pending queue
+        // If a hand is currently in progress or just finished, hold this player in a pending queue
         // rather than adding them to the active game — they'll join at the next hand.
         if (players.size > 0) {
             if (!pendingPlayers.includes(socket.id)) {
