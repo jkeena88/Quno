@@ -592,7 +592,7 @@ socket.on('turnChange', function(PlayerID) {
     const activeEl = document.getElementById('player_' + PlayerID); // none when the hand is over (-1)
     if (activeEl) activeEl.classList.add('active');
 
-    if(PlayerID == playerId) {
+    if(PlayerID >= 0 && PlayerID == playerId) {
         playSound('audio/turn-change.wav');
 
         const topCard = getTopCard();
@@ -1752,13 +1752,9 @@ function init() {
     if(playerName == null) {
         let defaultName = 'Player' + Math.floor(1000 + Math.random() * 9000);
 
-        playerName = prompt('Enter your name: ', defaultName);
-
-        if (playerName === null || playerName === "") {
-            playerName = defaultName;
-        } else {
-            savePlayerName(playerName.substring(0, 29));
-        }
+        // Cancelling or leaving it blank keeps the suggested name, and either way the name is saved
+        playerName = (prompt('Enter your name: ', defaultName) || '').trim() || defaultName;
+        savePlayerName(playerName.substring(0, 29));
     }
 
     playerName = playerName.substring(0, 29);
@@ -1859,7 +1855,8 @@ function playSound(src, volume=1.0) {
     if (soundMuted || soundVolume === 0) return;
     const audio = new Audio(src);
     audio.volume = Math.min(1, volume * soundVolume);
-    audio.play();
+    const playing = audio.play();
+    if (playing && playing.catch) playing.catch(() => {}); // blocked by autoplay rules or a missing file: just stay silent
 }
 
 // Read the top card's color and type from the discard pile DOM element
