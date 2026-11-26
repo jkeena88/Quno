@@ -11,6 +11,7 @@ const crypto = require('crypto');
 const {
     buildCard, createDeck: buildDeck, shuffle,
     canPlay: canPlayHand, getPoints, nextPlayerID, reshuffleSeats: reshuffleSeatsMap, recordDrawStats, clearQunoCallOnDraw,
+    buildRequiredPlay: buildRequiredPlayFor,
 } = require('./Gamelogic');
 
 app.use(express.static(__dirname + '/public', { 'Content-Type': 'application/javascript' }));
@@ -936,17 +937,7 @@ function performDraw(player) {
 // For a draw2 stack: more draw2s, and (if enabled) skips and reverses.
 // For a draw4 stack: more draw4s, and (if enabled) skips and reverses.
 function buildRequiredPlay() {
-    const rp = [];
-    if (stackType === 'draw2') {
-        if (stackDraw2)   rp.push('draw2');
-        if (skipDraw2)    rp.push('skip');
-        if (reverseDraw2) rp.push('reverse');
-    } else if (stackType === 'draw4') {
-        if (stackDraw4)   rp.push('draw4');
-        if (skipDraw4)    rp.push('skip');
-        if (reverseDraw4) rp.push('reverse');
-    }
-    return rp;
+    return buildRequiredPlayFor(stackType, currentOptions());
 }
 
 // After a draw card (or a skip/reverse mid-stack) has been played and the turn
