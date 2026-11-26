@@ -21,11 +21,11 @@ jobs:
         with:
           node-version: '18.x'
 
-      - name: npm install, build, and test
+      - name: npm install, test, and trim for deploy
         run: |
-          npm install --production
-          npm run build --if-present
-          npm run test --if-present
+          npm ci
+          npm test
+          npm prune --omit=dev
       
       - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v4

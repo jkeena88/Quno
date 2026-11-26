@@ -208,25 +208,6 @@ function buildRequiredPlay(stackType, options = {}) {
     return rp;
 }
 
-// ── computeHandMargin ─────────────────────────────────────────────────────────
-// Returns the CSS margin-left (in px, negative = overlap) to apply between
-// cards in a hand, given the container width, card count, and scale constants.
-// Clamped between minMargin and maxMargin.
-//
-// usableW:    available container width in px (container width minus any padding)
-// cardCount:  number of cards in the hand
-// cssCardW:   card width before CSS scale is applied (default 107)
-// scale:      CSS scale factor (default 0.6)
-// minMargin:  minimum (least-overlap) margin — cards start here (e.g. -57 for own, -70 for opponent)
-// maxMargin:  maximum (most-overlap) margin — hard cap on compression (e.g. -64 or -80)
-
-function computeHandMargin(usableW, cardCount, cssCardW = 107, scale = 0.6, minMargin = -57, maxMargin = -64) {
-    if (cardCount <= 1) return 0;
-    const visW = cssCardW * scale;
-    const fitMargin = ((usableW - visW) / (cardCount - 1) - visW) / scale;
-    return Math.max(maxMargin, Math.min(minMargin, fitMargin));
-}
-
 // ── clearQunoCallOnDraw ───────────────────────────────────────────────────────
 // A player's Quno call only covers the hand they had when they made it. Whenever
 // their hand grows (a penalty, a stack payout, a search draw), the call is void.
@@ -240,5 +221,5 @@ module.exports = {
     cardColor, cardType, cardValue, buildCard,
     createDeck, shuffle,
     canPlay, getPoints, nextPlayerID, reshuffleSeats,
-    buildRequiredPlay, computeHandMargin, recordDrawStats, clearQunoCallOnDraw,
+    buildRequiredPlay, recordDrawStats, clearQunoCallOnDraw,
 };
